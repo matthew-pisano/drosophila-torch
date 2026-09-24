@@ -85,11 +85,7 @@ def build_neuron_index(edges: pd.DataFrame, annotations: pd.DataFrame) -> tuple[
         all_bodies (ordered Index of body IDs) and body_to_idx (body ID to integer position)."""
 
     all_bodies = pd.Index(
-        pd.concat([
-            edges["body_pre"],
-            edges["body_post"],
-            annotations["bodyid"],
-        ]).unique()
+        set(edges["body_pre"]).union(edges["body_post"]).union(annotations["bodyid"])
     )
     body_to_idx = {body: idx for idx, body in enumerate(all_bodies)}
 
