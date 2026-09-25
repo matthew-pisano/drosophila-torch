@@ -7,7 +7,6 @@ import argparse
 from pathlib import Path
 
 import matplotlib.pyplot as plt
-import numpy as np
 import torch
 
 
@@ -18,17 +17,22 @@ def load_tensors(pt_path: Path) -> dict:
     return torch.load(pt_path, weights_only=True)
 
 
-def plot_soma_locations(data: dict) -> None:
+def plot_soma_locations(data: dict, modulo_filter: int = 1) -> None:
     """Plot neuron soma locations as a 3D scatter colored by superclass.
 
-    Skips neurons where any coordinate is NaN."""
+    Skips neurons where any coordinate is NaN. Adding a modulo filter filters out all neurons except the Nth."""
 
-    soma_xyz = data["soma_xyz"].numpy()  # [N, 3]
-    superclass_ids = data["superclass_ids"].numpy()  # [N]
+    soma_xyz = data["soma_xyz"]  # [N, 3]
+    superclass_ids = data["superclass_ids"]  # [N]
     superclass_labels = data["superclass_labels"]  # list[str]
 
+    # Filter out all points except for those modulo the filter
+    soma_xyz = soma_xyz[::modulo_filter]
+    superclass_ids = superclass_ids[::modulo_filter]
+    superclass_labels = superclass_labels[::modulo_filter]
+
     # Mask out neurons with no soma location
-    valid = ~np.isnan(soma_xyz).any(axis=1)
+    valid = ~torch.isnan(soma_xyz).any(dim=1)
     soma_xyz = soma_xyz[valid]
     superclass_ids = superclass_ids[valid]
 
@@ -44,7 +48,7 @@ def plot_soma_locations(data: dict) -> None:
         soma_xyz[:, 1],
         soma_xyz[:, 2],
         c=colors,
-        s=1,
+        s=2,
         alpha=0.5,
         linewidths=0,
     )
@@ -76,10 +80,16 @@ def main():
         description="Visualise MaleCNS soma locations from a .pt tensor file."
     )
     parser.add_argument("pt_file", help="Path to the neuron data tensor")
+    parser.add_argument(
+        "--mod", "--modulo-filter",
+        type=int,
+        default=1,
+        help="Filters out all data points except for the Nth."
+    )
     args = parser.parse_args()
 
     data = load_tensors(Path(args.pt_file))
-    plot_soma_locations(data)
+    plot_soma_locations(data, modulo_filter=args.mod)
 
 
 if __name__ == "__main__":
