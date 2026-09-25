@@ -84,16 +84,23 @@ def filter_neurons(
     """Restrict annotations and edges to a subset of neurons.
 
     Filters annotations by superclass and/or type, then drops any edge whose pre or post body ID is not in the surviving
-    annotation set. Both filters are applied as OR within each argument and AND between arguments — e.g.
+    annotation set. Both filters are applied as OR within each argument and AND between arguments, e.g.
     --superclass descending_neuron visual_projection --type DNp01
     keeps neurons that are (descending_neuron OR visual_projection) AND type DNp01."""
 
     mask = pd.Series(True, index=annotations.index)
 
     if superclasses:
-        mask &= annotations["superclass"].isin(superclasses)
+        if "labeled" in superclasses:
+            mask &= annotations["superclass"].notna()
+        else:
+            mask &= annotations["superclass"].isin(superclasses)
+
     if types:
-        mask &= annotations["type"].isin(types)
+        if "labeled" in types:
+            mask &= annotations["type"].notna()
+        else:
+            mask &= annotations["type"].isin(types)
 
     annotations = annotations[mask]
     surviving = set(annotations["bodyid"].values)
@@ -358,13 +365,13 @@ def main():
         "--superclass",
         nargs="+",
         default=None,
-        help="Filter to one or more superclasses e.g. --superclass descending_neuron visual_projection"
+        help="Filter to one or more superclasses (or 'labeled' for all) e.g. --superclass descending_neuron visual_projection"
     )
     parser.add_argument(
         "--type",
         nargs="+",
         default=None,
-        help="Filter to one or more cell types e.g. --type DNp01 DNp02"
+        help="Filter to one or more cell types (or 'labeled' for all) e.g. --type DNp01 DNp02"
     )
     parser.add_argument(
         "--list",
