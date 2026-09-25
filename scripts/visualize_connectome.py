@@ -49,7 +49,7 @@ def plot_soma_locations(ax: plt.Axes, data: dict, colormap, num_classes: int, mo
     return soma_xyz
 
 
-def plot_edges(ax: plt.Axes, data: dict, sample_proportion: float) -> None:
+def plot_edges(ax: plt.Axes, data: dict, sample_proportion: float, colormap, num_classes: int) -> None:
     """Draw a random sample of edges as translucent gray lines.
 
     Extracts pre- / post-indices from the sparse CSR adjacency matrix, samples a proportion of them, then looks up soma
@@ -84,7 +84,10 @@ def plot_edges(ax: plt.Axes, data: dict, sample_proportion: float) -> None:
     # Build segment list for Line3DCollection: each segment is [[x0,y0,z0],[x1,y1,z1]]
     segments = torch.stack([pre_coords, post_coords], dim=1).numpy()
 
-    edge_collection = Line3DCollection(segments, linewidths=0.3, alpha=0.1, colors="grey")
+    pre_superclass = data["superclass_ids"][pre_idx[valid]]
+    edge_colors = colormap(pre_superclass.numpy() / max(num_classes - 1, 1))
+
+    edge_collection = Line3DCollection(segments, linewidths=0.3, alpha=0.1, colors=edge_colors)
     ax.add_collection3d(edge_collection)
 
 
@@ -126,7 +129,7 @@ def visualize(data: dict, edge_sample: float | None = None, modulo_filter: int =
     soma_xyz = plot_soma_locations(ax, data, colormap, num_classes, modulo_filter=modulo_filter)
 
     if edge_sample is not None:
-        plot_edges(ax, data, edge_sample)
+        plot_edges(ax, data, edge_sample, colormap, num_classes)
 
     set_equal_aspect(ax, soma_xyz)
 
