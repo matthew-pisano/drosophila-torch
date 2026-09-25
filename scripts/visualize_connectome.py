@@ -43,6 +43,13 @@ def plot_soma_locations(data: dict, modulo_filter: int = 1) -> None:
     fig = plt.figure(figsize=(12, 9))
     ax = fig.add_subplot(111, projection="3d")
 
+    max_range = (soma_xyz.max(dim=0).values - soma_xyz.min(dim=0).values).max().item() / 2
+    midpoints = soma_xyz.float().mean(dim=0)
+
+    ax.set_xlim(midpoints[0].item() - max_range, midpoints[0].item() + max_range)
+    ax.set_ylim(midpoints[1].item() - max_range, midpoints[1].item() + max_range)
+    ax.set_zlim(midpoints[2].item() - max_range, midpoints[2].item() + max_range)
+
     ax.scatter(
         soma_xyz[:, 0],
         soma_xyz[:, 1],
