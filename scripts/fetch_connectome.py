@@ -216,6 +216,24 @@ def build_adjacency_matrices(
     return W, W_unsigned
 
 
+def build_soma_coordinates(annotations: pd.DataFrame, all_bodies: pd.Index) -> torch.Tensor:
+    """Parse soma location strings into a float32 coordinate tensor.
+
+    Neurons with no soma location default to [0, 0, 0]. Coordinates are in voxel units at 8nm resolution.
+
+    Returns:
+        A 3D float32 tensor of soma coordinates."""
+
+    annotations = annotations.set_index("bodyid")
+    aligned = annotations["somalocation"].reindex(all_bodies)
+
+    coords = [
+        value if value is not None else [float('nan')] * 3
+        for value in aligned
+    ]
+    return torch.tensor(coords, dtype=torch.float32)
+
+
 def _encode_categorical(series: pd.Series) -> tuple[torch.Tensor, list[str]]:
     """Encode a string Series as int32 codes. NaN becomes 'unknown'.
 
@@ -291,6 +309,9 @@ def build_tensors(paths: dict[str, Path], superclasses: list[str] | None = None,
         pre_idx, post_idx, raw_weights, sign_vec, num_neurons=len(all_bodies)
     )
 
+    print("Building soma coordinates ...")
+    soma_xyz = build_soma_coordinates(annotations, all_bodies)
+
     print("Encoding annotations ...")
     annotation_tensors = build_annotation_tensors(annotations, all_bodies)
 
@@ -300,6 +321,7 @@ def build_tensors(paths: dict[str, Path], superclasses: list[str] | None = None,
         "sign_vec": sign_vec,
         "body_ids": torch.tensor(all_bodies.values, dtype=torch.int64),
         "N": len(all_bodies),
+        "soma_xyz": soma_xyz,
         **annotation_tensors,
         "meta": {
             "dataset": "male-cns:v1.0",
