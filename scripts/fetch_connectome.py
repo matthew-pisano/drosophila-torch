@@ -75,6 +75,36 @@ def load_feathers(paths: dict[str, Path]) -> tuple[pd.DataFrame, pd.DataFrame, p
     return edges, annotations, neurotransmitters
 
 
+def filter_neurons(
+        edges: pd.DataFrame,
+        annotations: pd.DataFrame,
+        superclasses: list[str] | None,
+        types: list[str] | None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Restrict annotations and edges to a subset of neurons.
+
+    Filters annotations by superclass and/or type, then drops any edge whose pre or post body ID is not in the surviving
+    annotation set. Both filters are applied as OR within each argument and AND between arguments — e.g.
+    --superclass descending_neuron visual_projection --type DNp01
+    keeps neurons that are (descending_neuron OR visual_projection) AND type DNp01."""
+
+    mask = pd.Series(True, index=annotations.index)
+
+    if superclasses:
+        mask &= annotations["superclass"].isin(superclasses)
+    if types:
+        mask &= annotations["type"].isin(types)
+
+    annotations = annotations[mask]
+    surviving = set(annotations["bodyid"].values)
+    edges = edges[
+        edges["body_pre"].isin(surviving) & edges["body_post"].isin(surviving)
+        ]
+
+    print(f"Filtered to {len(annotations):,} neurons, {len(edges):,} edges")
+    return edges, annotations
+
+
 def build_neuron_index(edges: pd.DataFrame, annotations: pd.DataFrame) -> tuple[pd.Index, pd.Series]:
     """Build a contiguous integer index over all body IDs.
 
@@ -231,12 +261,12 @@ def build_annotation_tensors(annotations: pd.DataFrame, all_bodies: pd.Index) ->
         codes, labels = _encode_categorical(aligned_series)
         result[f"{key}_ids"] = codes
         result[f"{key}_labels"] = labels
-        print(f"  {key}: {len(labels)} categories")
+        print(f"{key}: {len(labels)} categories")
 
     return result
 
 
-def build_tensors(paths: dict[str, Path]) -> dict:
+def build_tensors(paths: dict[str, Path], superclasses: list[str] | None = None, types: list[str] | None = None) -> dict:
     """Orchestrate the full feather to tensor conversion pipeline.
 
     Loads the three source files, builds the neuron index, edge tensors, sign vector, adjacency matrices, and annotation
@@ -244,6 +274,8 @@ def build_tensors(paths: dict[str, Path]) -> dict:
 
     print("\nLoading feather files ...")
     edges, annotations, neurotransmitters = load_feathers(paths)
+
+    edges, annotations = filter_neurons(edges, annotations, superclasses=superclasses, types=types)
 
     print("Building neuron index ...")
     all_bodies, body_to_idx = build_neuron_index(edges, annotations)
@@ -278,22 +310,60 @@ def build_tensors(paths: dict[str, Path]) -> dict:
     }
 
 
+def list_selectors(list_class: str, feather_dir: Path):
+    ann_path = feather_dir / ESSENTIAL_FILES["annotations"]
+    if not ann_path.exists():
+        download_file(f"{BASE_URL}/{ESSENTIAL_FILES['annotations']}", ann_path)
+
+    annotations = pd.read_feather(ann_path)
+    annotations.columns = annotations.columns.str.strip().str.lower()
+
+    values = annotations[list_class].dropna().unique()
+    values = sorted(values)
+    print(f"\nAvailable {list_class} values ({len(values)}):")
+    for value in values:
+        print(f"{value}")
+    return
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Download MaleCNS connectome and save as PyTorch tensors."
     )
     parser.add_argument("out_dir", help="Output directory")
     parser.add_argument("--out-file", default="malecns_tensors.pt", help="Name of the output .pt file")
+    parser.add_argument(
+        "--superclass",
+        nargs="+",
+        default=None,
+        help="Filter to one or more superclasses e.g. --superclass descending_neuron visual_projection"
+    )
+    parser.add_argument(
+        "--type",
+        nargs="+",
+        default=None,
+        help="Filter to one or more cell types e.g. --type DNp01 DNp02"
+    )
+    parser.add_argument(
+        "--list",
+        choices=["superclass", "type", "subclass"],
+        default=None,
+        help="List available values for a given annotation field and exit"
+    )
     args = parser.parse_args()
 
     out_dir = Path(args.out_dir)
     feather_dir = out_dir / "feather"
     pt_path = out_dir / args.out_file
 
+    if args.list:
+        list_selectors(args.list, feather_dir)
+        return
+
     out_dir.mkdir(parents=True, exist_ok=True)
 
     paths = ensure_files(feather_dir)
-    tensors = build_tensors(paths)
+    tensors = build_tensors(paths, args.superclass, args.type)
 
     print(f"\nSaving tensors to {pt_path} ...")
     torch.save(tensors, pt_path)
