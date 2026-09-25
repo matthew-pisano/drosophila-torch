@@ -75,7 +75,7 @@ def load_feathers(paths: dict[str, Path]) -> tuple[pd.DataFrame, pd.DataFrame, p
     return edges, annotations, neurotransmitters
 
 
-def build_neuron_index(edges: pd.DataFrame, annotations: pd.DataFrame) -> tuple[pd.Index, dict[int, int]]:
+def build_neuron_index(edges: pd.DataFrame, annotations: pd.DataFrame) -> tuple[pd.Index, pd.Series]:
     """Build a contiguous integer index over all body IDs.
 
     Takes the union of body IDs from the edge list and the annotation table so that annotated neurons with no
@@ -84,26 +84,61 @@ def build_neuron_index(edges: pd.DataFrame, annotations: pd.DataFrame) -> tuple[
     Returns:
         all_bodies (ordered Index of body IDs) and body_to_idx (body ID to integer position)."""
 
-    all_bodies = pd.Index(
-        set(edges["body_pre"]).union(edges["body_post"]).union(annotations["bodyid"])
-    )
-    body_to_idx = {body: idx for idx, body in enumerate(all_bodies)}
+    chunk_size = 100_000
+    unique_bodies = set(annotations["bodyid"].values)
 
+    with tqdm(total=len(edges), desc="Deduplicating body_pre") as pbar:
+        for start in range(0, len(edges), chunk_size):
+            chunk = edges["body_pre"].values[start: start + chunk_size]
+            unique_bodies.update(chunk)
+            pbar.update(chunk_size)
+
+    with tqdm(total=len(edges), desc="Deduplicating body_post") as pbar:
+        for start in range(0, len(edges), chunk_size):
+            chunk = edges["body_post"].values[start: start + chunk_size]
+            unique_bodies.update(chunk)
+            pbar.update(chunk_size)
+
+    unique_array = np.fromiter(unique_bodies, dtype=np.int64, count=len(unique_bodies))
+    del unique_bodies
+    unique_array.sort()  # in-place, no copy
+
+    all_bodies = pd.Index(unique_array)
+    del unique_array
+
+    body_to_idx = pd.Series(np.arange(len(all_bodies), dtype=np.int64), index=all_bodies)
     print(f"Total neurons: {len(all_bodies):,}")
     return all_bodies, body_to_idx
 
 
-def build_edge_tensors(edges: pd.DataFrame, body_to_idx: dict[int, int]) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+def build_edge_tensors(edges: pd.DataFrame, body_to_idx: pd.Series) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Convert the edge dataframe to index and weight tensors.
 
     Returns:
         pre_idx, post_idx, and raw_weights."""
 
-    pre_idx = torch.tensor(edges["body_pre"].map(body_to_idx).values, dtype=torch.long)
-    post_idx = torch.tensor(edges["body_post"].map(body_to_idx).values, dtype=torch.long)
+    chunk_size = 100_000
+    num_edges = len(edges)
+    pre_idx = torch.empty(num_edges, dtype=torch.long)
+    post_idx = torch.empty(num_edges, dtype=torch.long)
     raw_weights = torch.tensor(edges["weight"].values, dtype=torch.float32)
 
-    print(f"Total edges: {len(edges):,}")
+    with tqdm(total=num_edges, desc="Building edge tensors") as pbar:
+        for start in range(0, num_edges, chunk_size):
+            end = min(start + chunk_size, num_edges)
+            chunk = slice(start, end)
+
+            pre_idx[chunk] = torch.tensor(
+                body_to_idx.reindex(edges["body_pre"].values[chunk]).values,
+                dtype=torch.long
+            )
+            post_idx[chunk] = torch.tensor(
+                body_to_idx.reindex(edges["body_post"].values[chunk]).values,
+                dtype=torch.long
+            )
+            pbar.update(end - start)
+
+    print(f"Total edges: {num_edges:,}")
     return pre_idx, post_idx, raw_weights
 
 
