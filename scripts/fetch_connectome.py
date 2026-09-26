@@ -271,6 +271,31 @@ def build_soma_coordinates(annotations: pd.DataFrame, all_bodies: pd.Index) -> t
     return torch.tensor(coords, dtype=torch.float32)
 
 
+def build_edge_delay_vector(
+        edge_pre_idx: torch.Tensor,
+        edge_post_idx: torch.Tensor,
+        soma_xyz: torch.Tensor,
+        soma_xyz_valid: torch.Tensor,
+        delay_per_voxel: float = 500_000 / 8,  # 500,000 nm per ms speed / 8 nm per voxel
+        min_delay: int = 1,
+) -> torch.Tensor:
+    """Estimate per-edge synaptic delay from soma distance."""
+
+    edge_pre_xyz = soma_xyz[edge_pre_idx]
+    edge_post_xyz = soma_xyz[edge_post_idx]
+
+    # Euclidean distance in 8nm voxels
+    dist = torch.norm(edge_post_xyz - edge_pre_xyz, dim=-1)
+
+    # Mask edges where either endpoint has no soma location
+    valid = soma_xyz_valid[edge_pre_idx] & soma_xyz_valid[edge_post_idx]
+
+    delay = (dist / delay_per_voxel).round().long().clamp(min=min_delay)
+    delay = torch.where(valid, delay, torch.tensor(min_delay))  # NaN coordinate neurons experience min_delay
+
+    return delay
+
+
 def _encode_categorical(series: pd.Series) -> tuple[torch.Tensor, list[str]]:
     """Encode a string Series as int32 codes. NaN becomes 'unknown'.
 
@@ -348,6 +373,10 @@ def build_tensors(paths: dict[str, Path], superclasses: list[str] | None = None,
 
     print("Building soma coordinates ...")
     soma_xyz = build_soma_coordinates(annotations, all_bodies)
+    soma_xyz_valid = ~torch.isnan(soma_xyz).any(dim=-1)
+
+    print("Building edge delay vector ...")
+    edge_delay_vec = build_edge_delay_vector(edge_pre_idx, edge_post_idx, soma_xyz, soma_xyz_valid)
 
     print("Encoding annotations ...")
     annotation_tensors = build_annotation_tensors(annotations, all_bodies)
@@ -357,12 +386,13 @@ def build_tensors(paths: dict[str, Path], superclasses: list[str] | None = None,
         "edge_pre_idx": edge_pre_idx,  # The starting neurons of each edge
         "edge_post_idx": edge_post_idx,  # The ending neurons of each edge
         "edge_weights": edge_weights,  # The synapse counts for each edge
+        "edge_delay_vec": edge_delay_vec,  # The delay of each edge in ms
         "nt_vec": nt_vec,  # A vector of neurotransmitter values, indexed for each neuron
         "sign_vec": sign_vec,  # A vector of neurotransmitter signs
         "body_ids": torch.tensor(all_bodies.values, dtype=torch.int64),  # The body ids of each neuron
         "N": len(all_bodies),  # The number of neurons in the data
         "soma_xyz": soma_xyz,  # A vector of 3D neuron coordinates
-        "soma_xyz_valid": ~torch.isnan(soma_xyz).any(dim=-1),  # A NaN mask for whether a neuron has valid coordinates
+        "soma_xyz_valid": soma_xyz_valid,  # A NaN mask for whether a neuron has valid coordinates
         **annotation_tensors,
         "meta": {
             "dataset": "male-cns:v1.0",
