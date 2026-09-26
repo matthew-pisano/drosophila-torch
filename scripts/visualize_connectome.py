@@ -56,9 +56,9 @@ def plot_edges(ax: plt.Axes, data: dict, sample_proportion: float, colormap, num
     coordinates for each endpoint. Edges where either endpoint has no soma location are skipped."""
 
     print("Extracting edges from sparse matrix ...")
-    W_coo = data["W"].to_sparse_coo().coalesce()
-    pre_idx = W_coo.indices()[0]
-    post_idx = W_coo.indices()[1]
+    adj_coo = data["adj"].to_sparse_coo().coalesce()
+    pre_idx = adj_coo.indices()[0]
+    post_idx = adj_coo.indices()[1]
 
     num_edges = pre_idx.shape[0]
     num_samples = max(1, int(num_edges * sample_proportion))

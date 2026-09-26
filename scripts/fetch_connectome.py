@@ -2,6 +2,7 @@
 them to PyTorch tensors."""
 
 import argparse
+from enum import IntEnum
 from pathlib import Path
 
 import numpy as np
@@ -9,6 +10,18 @@ import pandas as pd
 import requests
 import torch
 from tqdm import tqdm
+
+
+class NTType(IntEnum):
+    """An enum of neurotransmitter types."""
+
+    UNKNOWN = 0
+    ACETYLCHOLINE = 1
+    GABA = 2
+    GLUTAMATE = 3
+    DOPAMINE = 4
+    SEROTONIN = 5
+    OCTOPAMINE = 6
 
 
 BASE_URL = (
@@ -22,13 +35,23 @@ ESSENTIAL_FILES = {
     "nt": "body-neurotransmitters-male-cns-v1.0.feather",
 }
 
+NT_STRING_TO_ENUM = {
+    "acetylcholine": NTType.ACETYLCHOLINE,
+    "gaba": NTType.GABA,
+    "glutamate": NTType.GLUTAMATE,
+    "dopamine": NTType.DOPAMINE,
+    "serotonin": NTType.SEROTONIN,
+    "octopamine": NTType.OCTOPAMINE,
+}
+
 NT_SIGN = {
-    "acetylcholine": +1.0,
-    "gaba": -1.0,
-    "glutamate": -1.0,  # inhibitory at most central synapses in Drosophila
-    "octopamine": +1.0,
-    "serotonin": +1.0,
-    "dopamine": +1.0,
+    NTType.UNKNOWN: 1.0,
+    NTType.ACETYLCHOLINE: 1.0,
+    NTType.GABA: -1.0,
+    NTType.GLUTAMATE: -1.0,
+    NTType.DOPAMINE: 1.0,
+    NTType.SEROTONIN: 1.0,
+    NTType.OCTOPAMINE: 1.0,
 }
 
 
@@ -179,48 +202,55 @@ def build_edge_tensors(edges: pd.DataFrame, body_to_idx: pd.Series) -> tuple[tor
     return pre_idx, post_idx, raw_weights
 
 
-def build_sign_vector(neurotransmitters: pd.DataFrame, all_bodies: pd.Index) -> torch.Tensor:
-    """Derive a per-neuron excitatory/inhibitory sign from predicted_nt.
+def build_nt_tensors(neurotransmitters: pd.DataFrame, all_bodies: pd.Index) -> tuple[torch.Tensor, torch.Tensor]:
+    """Encode per-neuron NT type as integer enum and sign value.
 
-    Neurons absent from the neurotransmitter table default to +1 (excitatory).
+    The value associated with each neuron represents its NT type.
+    Positive sign values as excitatory and negative as inhibitory.
 
     Returns:
-        A tensor of sign information for neurons."""
+        A tensor of NT values, indexed with neuron body indices.
+        A tensor of NT signs, indexed with neuron body indices."""
 
     nt_indexed = neurotransmitters.set_index("body")["predicted_nt"]
-    nt_aligned = nt_indexed.reindex(all_bodies)
+    nt_aligned = nt_indexed.reindex(all_bodies)  # NaN for missing neurons
 
-    sign_values = nt_aligned.map(NT_SIGN).fillna(1.0).values.astype(np.float32)
-    return torch.tensor(sign_values)
+    # Map strings to enum integers
+    nt_codes = (
+        nt_aligned
+        .map(NT_STRING_TO_ENUM)  # Known strings as NTType int
+        .fillna(int(NTType.UNKNOWN))  # Missing as 0
+        .astype(np.int32)
+    )
+
+    nt_vec = torch.tensor(nt_codes.values, dtype=torch.int32)
+
+    sign_map = torch.tensor([NT_SIGN[NTType(i)] for i in range(len(NTType))], dtype=torch.float32)
+    sign_vec = sign_map[nt_vec.long()]
+
+    return nt_vec, sign_vec
 
 
-def build_adjacency_matrices(
+def build_adjacency_matrix(
         pre_idx: torch.Tensor,
         post_idx: torch.Tensor,
         raw_weights: torch.Tensor,
-        sign_vec: torch.Tensor,
         num_neurons: int,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Build signed and unsigned sparse CSR adjacency matrices.
+) -> torch.Tensor:
+    """Build sparse CSR adjacency matrix.
 
-    W applies the pre-synaptic neuron's neurotransmitter sign to each edge weight, so inhibitory connections carry
-    negative values. W_unsigned holds raw synapse counts. Both are sparse CSR for efficient matrix-vector products.
+    Adj matrix holds raw synapse counts as sparse CSR for efficient matrix-vector products.
 
     Returns:
-        W (signed) and W_unsigned matrices."""
+        The sparse CSR adjacency matrix for neurons."""
 
     edge_indices = torch.stack([pre_idx, post_idx])
-    signed_weights = raw_weights * sign_vec[pre_idx]
 
-    W = (
-        torch.sparse_coo_tensor(edge_indices, signed_weights, size=(num_neurons, num_neurons))
-        .to_sparse_csr()
-    )
-    W_unsigned = (
+    adj = (
         torch.sparse_coo_tensor(edge_indices, raw_weights, size=(num_neurons, num_neurons))
         .to_sparse_csr()
     )
-    return W, W_unsigned
+    return adj
 
 
 def build_soma_coordinates(annotations: pd.DataFrame, all_bodies: pd.Index) -> torch.Tensor:
@@ -309,11 +339,11 @@ def build_tensors(paths: dict[str, Path], superclasses: list[str] | None = None,
     pre_idx, post_idx, raw_weights = build_edge_tensors(edges, body_to_idx)
 
     print("Computing neurotransmitter signs ...")
-    sign_vec = build_sign_vector(neurotransmitters, all_bodies)
+    nt_vec, sign_vec = build_nt_tensors(neurotransmitters, all_bodies)
 
     print("Building adjacency matrices ...")
-    W, W_unsigned = build_adjacency_matrices(
-        pre_idx, post_idx, raw_weights, sign_vec, num_neurons=len(all_bodies)
+    adj = build_adjacency_matrix(
+        pre_idx, post_idx, raw_weights, num_neurons=len(all_bodies)
     )
 
     print("Building soma coordinates ...")
@@ -323,18 +353,18 @@ def build_tensors(paths: dict[str, Path], superclasses: list[str] | None = None,
     annotation_tensors = build_annotation_tensors(annotations, all_bodies)
 
     return {
-        "W": W,
-        "W_unsigned": W_unsigned,
-        "sign_vec": sign_vec,
-        "body_ids": torch.tensor(all_bodies.values, dtype=torch.int64),
-        "N": len(all_bodies),
-        "soma_xyz": soma_xyz,
+        "adj": adj,  # Sparse adjacency matrix between neurons
+        "nt_vec": nt_vec,  # A vector of neurotransmitter values, indexed for each neuron
+        "sign_vec": sign_vec,  # A vector of neurotransmitter signs
+        "body_ids": torch.tensor(all_bodies.values, dtype=torch.int64),  # The body ids of each neuron
+        "N": len(all_bodies),  # The number of neurons in the data
+        "soma_xyz": soma_xyz,  # A vector of 3D neuron coordinates
         **annotation_tensors,
         "meta": {
             "dataset": "male-cns:v1.0",
             "source": BASE_URL,
             "num_edges": len(edges),
-            "nt_sign_map": NT_SIGN,
+            "nt_name_map": {int(nt): name for name, nt in NT_STRING_TO_ENUM.items()},
         },
     }
 
