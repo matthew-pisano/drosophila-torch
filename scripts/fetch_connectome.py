@@ -175,31 +175,31 @@ def build_edge_tensors(edges: pd.DataFrame, body_to_idx: pd.Series) -> tuple[tor
     """Convert the edge dataframe to index and weight tensors.
 
     Returns:
-        pre_idx, post_idx, and raw_weights."""
+        edge_pre_idx, edge_post_idx, and edge_weights."""
 
     chunk_size = 100_000
     num_edges = len(edges)
-    pre_idx = torch.empty(num_edges, dtype=torch.long)
-    post_idx = torch.empty(num_edges, dtype=torch.long)
-    raw_weights = torch.tensor(edges["weight"].values, dtype=torch.float32)
+    edge_pre_idx = torch.empty(num_edges, dtype=torch.long)
+    edge_post_idx = torch.empty(num_edges, dtype=torch.long)
+    edge_weights = torch.tensor(edges["weight"].values, dtype=torch.float32)
 
     with tqdm(total=num_edges, desc="Building edge tensors") as pbar:
         for start in range(0, num_edges, chunk_size):
             end = min(start + chunk_size, num_edges)
             chunk = slice(start, end)
 
-            pre_idx[chunk] = torch.tensor(
+            edge_pre_idx[chunk] = torch.tensor(
                 body_to_idx.reindex(edges["body_pre"].values[chunk]).values,
                 dtype=torch.long
             )
-            post_idx[chunk] = torch.tensor(
+            edge_post_idx[chunk] = torch.tensor(
                 body_to_idx.reindex(edges["body_post"].values[chunk]).values,
                 dtype=torch.long
             )
             pbar.update(end - start)
 
     print(f"Total edges: {num_edges:,}")
-    return pre_idx, post_idx, raw_weights
+    return edge_pre_idx, edge_post_idx, edge_weights
 
 
 def build_nt_tensors(neurotransmitters: pd.DataFrame, all_bodies: pd.Index) -> tuple[torch.Tensor, torch.Tensor]:
@@ -234,7 +234,7 @@ def build_nt_tensors(neurotransmitters: pd.DataFrame, all_bodies: pd.Index) -> t
 def build_adjacency_matrix(
         pre_idx: torch.Tensor,
         post_idx: torch.Tensor,
-        raw_weights: torch.Tensor,
+        edge_weights: torch.Tensor,
         num_neurons: int,
 ) -> torch.Tensor:
     """Build sparse CSR adjacency matrix.
@@ -247,7 +247,7 @@ def build_adjacency_matrix(
     edge_indices = torch.stack([pre_idx, post_idx])
 
     adj = (
-        torch.sparse_coo_tensor(edge_indices, raw_weights, size=(num_neurons, num_neurons))
+        torch.sparse_coo_tensor(edge_indices, edge_weights, size=(num_neurons, num_neurons))
         .to_sparse_csr()
     )
     return adj
@@ -336,14 +336,14 @@ def build_tensors(paths: dict[str, Path], superclasses: list[str] | None = None,
     all_bodies, body_to_idx = build_neuron_index(edges, annotations)
 
     print("Building edge tensors ...")
-    pre_idx, post_idx, raw_weights = build_edge_tensors(edges, body_to_idx)
+    edge_pre_idx, edge_post_idx, edge_weights = build_edge_tensors(edges, body_to_idx)
 
     print("Computing neurotransmitter signs ...")
     nt_vec, sign_vec = build_nt_tensors(neurotransmitters, all_bodies)
 
     print("Building adjacency matrices ...")
     adj = build_adjacency_matrix(
-        pre_idx, post_idx, raw_weights, num_neurons=len(all_bodies)
+        edge_pre_idx, edge_post_idx, edge_weights, num_neurons=len(all_bodies)
     )
 
     print("Building soma coordinates ...")
@@ -354,11 +354,15 @@ def build_tensors(paths: dict[str, Path], superclasses: list[str] | None = None,
 
     return {
         "adj": adj,  # Sparse adjacency matrix between neurons
+        "edge_pre_idx": edge_pre_idx,  # The starting neurons of each edge
+        "edge_post_idx": edge_post_idx,  # The ending neurons of each edge
+        "edge_weights": edge_weights,  # The synapse counts for each edge
         "nt_vec": nt_vec,  # A vector of neurotransmitter values, indexed for each neuron
         "sign_vec": sign_vec,  # A vector of neurotransmitter signs
         "body_ids": torch.tensor(all_bodies.values, dtype=torch.int64),  # The body ids of each neuron
         "N": len(all_bodies),  # The number of neurons in the data
         "soma_xyz": soma_xyz,  # A vector of 3D neuron coordinates
+        "soma_xyz_valid": ~torch.isnan(soma_xyz).any(dim=-1),  # A NaN mask for whether a neuron has valid coordinates
         **annotation_tensors,
         "meta": {
             "dataset": "male-cns:v1.0",
