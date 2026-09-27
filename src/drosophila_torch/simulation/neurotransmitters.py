@@ -36,8 +36,8 @@ class NTType(IntEnum):
             NTType.OCTOPAMINE: "octopamine",
         }[self]
 
-    @classmethod
-    def from_string(cls, string: str) -> NTType:
+    @staticmethod
+    def from_string(string: str) -> NTType:
         return {
             "acetylcholine": NTType.ACETYLCHOLINE,
             "gaba": NTType.GABA,

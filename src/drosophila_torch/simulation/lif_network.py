@@ -11,7 +11,7 @@ from dataclasses import dataclass
 import torch
 import torch.nn as nn
 
-from drosophila_torch.neurotransmitters import NTType
+from drosophila_torch.simulation.neurotransmitters import NTType
 
 
 logger = logging.getLogger(__name__)
@@ -300,17 +300,3 @@ class DrosophilaLIF(nn.Module):
                 )
 
         return spike_record, voltage_record
-
-
-def mean_firing_rate(spikes: torch.Tensor, dt: float = 1.0) -> torch.Tensor:
-    """Compute mean firing rate per neuron over a spike train.
-
-    Args:
-        spikes: float spike tensor.
-        dt: Timestep duration in ms.
-    Returns:
-        The mean firing rate in Hz."""
-
-    T = spikes.shape[0]
-    duration_s = T * dt * 1e-3
-    return spikes.sum(dim=0) / duration_s
