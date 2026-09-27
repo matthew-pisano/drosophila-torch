@@ -5,6 +5,10 @@ voxel units at 8nm resolution."""
 
 import argparse
 
+import torch
+
+from drosophila_torch.connectome import visualize
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -23,7 +27,7 @@ def main():
     )
     args = parser.parse_args()
 
-    data = load_tensors(Path(args.pt_file))
+    data = torch.load(args.pt_file, weights_only=True)
     visualize(data, modulo_filter=args.mod, edge_sample=args.edge_sample)
 
 

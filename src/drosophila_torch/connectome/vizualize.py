@@ -3,21 +3,12 @@
 Each point is a neuron soma, colored by superclass. Neurons without a soma location are skipped. Coordinates are in
 voxel units at 8nm resolution."""
 
-from pathlib import Path
-
 import matplotlib.pyplot as plt
 import torch
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
 
 
-def load_tensors(pt_path: Path) -> dict:
-    """Load the tensor dict from a .pt file."""
-
-    print(f"Loading {pt_path} ...")
-    return torch.load(pt_path, weights_only=True)
-
-
-def plot_soma_locations(ax: plt.Axes, data: dict, colormap, num_classes: int, modulo_filter: int = 1) -> torch.Tensor:
+def _plot_soma_locations(ax: plt.Axes, data: dict, colormap, num_classes: int, modulo_filter: int = 1) -> torch.Tensor:
     """Scatter plot of soma locations colored by superclass.
 
     Adding a modulo filter filters out all neurons except the Nth.
@@ -48,7 +39,7 @@ def plot_soma_locations(ax: plt.Axes, data: dict, colormap, num_classes: int, mo
     return soma_xyz
 
 
-def plot_edges(ax: plt.Axes, data: dict, sample_proportion: float, colormap, num_classes: int) -> None:
+def _plot_edges(ax: plt.Axes, data: dict, sample_proportion: float, colormap, num_classes: int) -> None:
     """Draw a random sample of edges as translucent gray lines.
 
     Extracts pre- / post-indices from the sparse CSR adjacency matrix, samples a proportion of them, then looks up soma
@@ -90,7 +81,7 @@ def plot_edges(ax: plt.Axes, data: dict, sample_proportion: float, colormap, num
     ax.add_collection3d(edge_collection)
 
 
-def set_equal_aspect(ax: plt.Axes, soma_xyz: torch.Tensor) -> None:
+def _set_equal_aspect(ax: plt.Axes, soma_xyz: torch.Tensor) -> None:
     """Force equal axis scaling so the volume renders without distortion."""
 
     max_range = (soma_xyz.max(dim=0).values - soma_xyz.min(dim=0).values).max().item() / 2
@@ -101,7 +92,7 @@ def set_equal_aspect(ax: plt.Axes, soma_xyz: torch.Tensor) -> None:
     ax.set_zlim(midpoints[2].item() - max_range, midpoints[2].item() + max_range)
 
 
-def build_legend(colormap, num_classes: int, superclass_labels: list[str]) -> list:
+def _build_legend(colormap, num_classes: int, superclass_labels: list[str]) -> list:
     """Build legend handles, one per superclass, skipping 'unknown'."""
 
     return [
@@ -125,14 +116,14 @@ def visualize(data: dict, edge_sample: float | None = None, modulo_filter: int =
     fig = plt.figure(figsize=(12, 9))
     ax = fig.add_subplot(111, projection="3d")
 
-    soma_xyz = plot_soma_locations(ax, data, colormap, num_classes, modulo_filter=modulo_filter)
+    soma_xyz = _plot_soma_locations(ax, data, colormap, num_classes, modulo_filter=modulo_filter)
 
     if edge_sample is not None:
-        plot_edges(ax, data, edge_sample, colormap, num_classes)
+        _plot_edges(ax, data, edge_sample, colormap, num_classes)
 
-    set_equal_aspect(ax, soma_xyz)
+    _set_equal_aspect(ax, soma_xyz)
 
-    ax.legend(handles=build_legend(colormap, num_classes, superclass_labels),
+    ax.legend(handles=_build_legend(colormap, num_classes, superclass_labels),
               loc="upper left", fontsize=7, framealpha=0.7, markerscale=1.5)
 
     ax.set_xlabel("X (voxels)")

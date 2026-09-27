@@ -7,13 +7,13 @@ from pathlib import Path
 import pandas as pd
 import torch
 
+from drosophila_torch.connectome import download, build
+
 
 def list_selectors(list_class: str, feather_dir: Path):
-    """Lists the available annodations of the given class."""
+    """Lists the available annotations of the given class."""
 
-    ann_path = feather_dir / ESSENTIAL_FILES["annotations"]
-    if not ann_path.exists():
-        download_file(f"{BASE_URL}/{ESSENTIAL_FILES['annotations']}", ann_path)
+    ann_path = download(feather_dir)["annotations"]
 
     annotations = pd.read_feather(ann_path)
     annotations.columns = annotations.columns.str.strip().str.lower()
@@ -62,8 +62,8 @@ def main():
 
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    paths = ensure_files(feather_dir)
-    tensors = build_tensors(paths, args.superclass, args.type)
+    paths = download(feather_dir)
+    tensors = build(paths, args.superclass, args.type)
 
     print(f"\nSaving tensors to {pt_path} ...")
     torch.save(tensors, pt_path)

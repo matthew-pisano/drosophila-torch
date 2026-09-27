@@ -1,0 +1,328 @@
+"""Converts raw Janelia GCS files to PyTorch tensors."""
+
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import torch
+from tqdm import tqdm
+
+from drosophila_torch.neurotransmitters import NTType
+
+
+def _load_feathers(paths: dict[str, Path]) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Load the three feather files and normalize column names to lowercase.
+
+    Returns:
+        edges, annotations, neurotransmitters as DataFrames."""
+
+    edges = pd.read_feather(paths["edges"])
+    annotations = pd.read_feather(paths["annotations"])
+    neurotransmitters = pd.read_feather(paths["nt"])
+
+    for dataframe in (edges, annotations, neurotransmitters):
+        dataframe.columns = dataframe.columns.str.strip().str.lower()
+
+    return edges, annotations, neurotransmitters
+
+
+def _filter_neurons(
+        edges: pd.DataFrame,
+        annotations: pd.DataFrame,
+        superclasses: list[str] | None,
+        types: list[str] | None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Restrict annotations and edges to a subset of neurons.
+
+    Filters annotations by superclass and/or type, then drops any edge whose pre or post body ID is not in the surviving
+    annotation set. Both filters are applied as OR within each argument and AND between arguments, e.g.
+    --superclass descending_neuron visual_projection --type DNp01
+    keeps neurons that are (descending_neuron OR visual_projection) AND type DNp01."""
+
+    mask = pd.Series(True, index=annotations.index)
+
+    if superclasses:
+        if "labeled" in superclasses:
+            mask &= annotations["superclass"].notna()
+        else:
+            mask &= annotations["superclass"].isin(superclasses)
+
+    if types:
+        if "labeled" in types:
+            mask &= annotations["type"].notna()
+        else:
+            mask &= annotations["type"].isin(types)
+
+    annotations = annotations[mask]
+    surviving = set(annotations["bodyid"].values)
+    edges = edges[
+        edges["body_pre"].isin(surviving) & edges["body_post"].isin(surviving)
+        ]
+
+    print(f"Filtered to {len(annotations):,} neurons, {len(edges):,} edges")
+    return edges, annotations
+
+
+def _build_neuron_index(edges: pd.DataFrame, annotations: pd.DataFrame) -> tuple[pd.Index, pd.Series]:
+    """Build a contiguous integer index over all body IDs.
+
+    Takes the union of body IDs from the edge list and the annotation table so that annotated neurons with no
+    connections are still represented.
+
+    Returns:
+        all_bodies (ordered Index of body IDs) and body_to_idx (body ID to integer position)."""
+
+    chunk_size = 100_000
+    unique_bodies = set(annotations["bodyid"].values)
+
+    with tqdm(total=len(edges), desc="Deduplicating body_pre") as pbar:
+        for start in range(0, len(edges), chunk_size):
+            chunk = edges["body_pre"].values[start: start + chunk_size]
+            unique_bodies.update(chunk)
+            pbar.update(chunk_size)
+
+    with tqdm(total=len(edges), desc="Deduplicating body_post") as pbar:
+        for start in range(0, len(edges), chunk_size):
+            chunk = edges["body_post"].values[start: start + chunk_size]
+            unique_bodies.update(chunk)
+            pbar.update(chunk_size)
+
+    unique_array = np.fromiter(unique_bodies, dtype=np.int64, count=len(unique_bodies))
+    del unique_bodies
+    unique_array.sort()  # in-place, no copy
+
+    all_bodies = pd.Index(unique_array)
+    del unique_array
+
+    body_to_idx = pd.Series(np.arange(len(all_bodies), dtype=np.int64), index=all_bodies)
+    print(f"Total neurons: {len(all_bodies):,}")
+    return all_bodies, body_to_idx
+
+
+def _build_edge_tensors(edges: pd.DataFrame, body_to_idx: pd.Series) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Convert the edge dataframe to index and weight tensors.
+
+    Returns:
+        edge_pre_idx, edge_post_idx, and edge_weights."""
+
+    chunk_size = 100_000
+    num_edges = len(edges)
+    edge_pre_idx = torch.empty(num_edges, dtype=torch.long)
+    edge_post_idx = torch.empty(num_edges, dtype=torch.long)
+    edge_weights = torch.tensor(edges["weight"].values, dtype=torch.float32)
+
+    with tqdm(total=num_edges, desc="Building edge tensors") as pbar:
+        for start in range(0, num_edges, chunk_size):
+            end = min(start + chunk_size, num_edges)
+            chunk = slice(start, end)
+
+            edge_pre_idx[chunk] = torch.tensor(
+                body_to_idx.reindex(edges["body_pre"].values[chunk]).values,
+                dtype=torch.long
+            )
+            edge_post_idx[chunk] = torch.tensor(
+                body_to_idx.reindex(edges["body_post"].values[chunk]).values,
+                dtype=torch.long
+            )
+            pbar.update(end - start)
+
+    print(f"Total edges: {num_edges:,}")
+    return edge_pre_idx, edge_post_idx, edge_weights
+
+
+def _build_nt_tensors(neurotransmitters: pd.DataFrame, all_bodies: pd.Index) -> tuple[torch.Tensor, torch.Tensor]:
+    """Encode per-neuron NT type as integer enum and sign value.
+
+    The value associated with each neuron represents its NT type.
+    Positive sign values as excitatory and negative as inhibitory.
+
+    Returns:
+        A tensor of NT values, indexed with neuron body indices.
+        A tensor of NT signs, indexed with neuron body indices."""
+
+    nt_indexed = neurotransmitters.set_index("body")["predicted_nt"]
+    nt_aligned = nt_indexed.reindex(all_bodies)  # NaN for missing neurons
+
+    # Map strings to enum integers
+    nt_codes = (
+        nt_aligned
+        .map(lambda x: NTType.from_string(x))  # Known strings as NTType int
+        .fillna(int(NTType.UNKNOWN))  # Missing as 0
+        .astype(np.int32)
+    )
+
+    nt_vec = torch.tensor(nt_codes.values, dtype=torch.int32)
+
+    sign_map = torch.tensor([NTType(i).sign() for i in range(len(NTType))], dtype=torch.float32)
+    sign_vec = sign_map[nt_vec.long()]
+
+    return nt_vec, sign_vec
+
+
+def _build_adjacency_matrix(
+        pre_idx: torch.Tensor,
+        post_idx: torch.Tensor,
+        edge_weights: torch.Tensor,
+        num_neurons: int,
+) -> torch.Tensor:
+    """Build sparse CSR adjacency matrix.
+
+    Adj matrix holds raw synapse counts as sparse CSR for efficient matrix-vector products.
+
+    Returns:
+        The sparse CSR adjacency matrix for neurons."""
+
+    edge_indices = torch.stack([pre_idx, post_idx])
+
+    adj = (
+        torch.sparse_coo_tensor(edge_indices, edge_weights, size=(num_neurons, num_neurons))
+        .to_sparse_csr()
+    )
+    return adj
+
+
+def _build_soma_coordinates(annotations: pd.DataFrame, all_bodies: pd.Index) -> torch.Tensor:
+    """Parse soma location strings into a float32 coordinate tensor.
+
+    Neurons with no soma location default to [0, 0, 0]. Coordinates are in voxel units at 8nm resolution.
+
+    Returns:
+        A 3D float32 tensor of soma coordinates."""
+
+    annotations = annotations.set_index("bodyid")
+    aligned = annotations["somalocation"].reindex(all_bodies)
+
+    coords = [
+        value if value is not None else [float('nan')] * 3
+        for value in aligned
+    ]
+    return torch.tensor(coords, dtype=torch.float32)
+
+
+def _build_edge_delay_vector(
+        edge_pre_idx: torch.Tensor,
+        edge_post_idx: torch.Tensor,
+        soma_xyz: torch.Tensor,
+        soma_xyz_valid: torch.Tensor,
+        delay_per_voxel: float = 500_000 / 8,  # 500,000 nm per ms speed / 8 nm per voxel
+        min_delay: int = 1,
+) -> torch.Tensor:
+    """Estimate per-edge synaptic delay from soma distance."""
+
+    edge_pre_xyz = soma_xyz[edge_pre_idx]
+    edge_post_xyz = soma_xyz[edge_post_idx]
+
+    # Euclidean distance in 8nm voxels
+    dist = torch.norm(edge_post_xyz - edge_pre_xyz, dim=-1)
+
+    # Mask edges where either endpoint has no soma location
+    valid = soma_xyz_valid[edge_pre_idx] & soma_xyz_valid[edge_post_idx]
+
+    delay = (dist / delay_per_voxel).round().long().clamp(min=min_delay)
+    delay = torch.where(valid, delay, torch.tensor(min_delay))  # NaN coordinate neurons experience min_delay
+
+    return delay
+
+
+def _encode_categorical(series: pd.Series) -> tuple[torch.Tensor, list[str]]:
+    """Encode a string Series as int32 codes. NaN becomes 'unknown'.
+
+    Returns:
+        An int32 tensor of codes and a label list for decoding."""
+
+    categorical = series.fillna("unknown").astype("category")
+    codes = torch.tensor(categorical.cat.codes.values.astype(np.int32))
+    labels = list(categorical.cat.categories)
+    return codes, labels
+
+
+def _build_annotation_tensors(annotations: pd.DataFrame, all_bodies: pd.Index) -> dict[str, torch.Tensor | list[str]]:
+    """Encode annotation columns as integer tensors aligned to the neuron index.
+
+    Extracts superclass, class, type, subclass, somaside, entrynerve, and exitnerve.
+    Each column is encoded as an int32 tensor with a companion label list for decoding. Neurons absent from the
+    annotation table receive 'unknown' for every field.
+
+    Returns:
+        A dict of tensor and label list pairs, keyed by field name."""
+
+    annotations = annotations.set_index("bodyid")
+
+    # Columns to encode: (output key prefix, source column)
+    annotation_columns = [
+        ("superclass", "superclass"),
+        ("class", "class"),
+        ("type", "type"),
+        ("subclass", "subclass"),
+        ("side", "somaside"),
+        ("entrynerve", "entrynerve"),
+        ("exitnerve", "exitnerve"),
+    ]
+
+    result = {}
+    for key, column in annotation_columns:
+        if column in annotations.columns:
+            aligned_series = annotations[column].reindex(all_bodies)
+        else:
+            aligned_series = pd.Series("unknown", index=all_bodies)
+
+        codes, labels = _encode_categorical(aligned_series)
+        result[f"{key}_ids"] = codes
+        result[f"{key}_labels"] = labels
+        print(f"{key}: {len(labels)} categories")
+
+    return result
+
+
+def build(paths: dict[str, Path], superclasses: list[str] | None = None, types: list[str] | None = None) -> dict:
+    """Orchestrate the full feather to connectome tensor conversion pipeline.
+
+    Loads the three source files, builds the neuron index, edge tensors, sign vector, adjacency matrices, and annotation
+    tensors, then packs everything into a single dict for torch.save()."""
+
+    print("\nLoading feather files ...")
+    edges, annotations, neurotransmitters = _load_feathers(paths)
+
+    edges, annotations = _filter_neurons(edges, annotations, superclasses=superclasses, types=types)
+
+    print("Building neuron index ...")
+    all_bodies, body_to_idx = _build_neuron_index(edges, annotations)
+
+    print("Building edge tensors ...")
+    edge_pre_idx, edge_post_idx, edge_weights = _build_edge_tensors(edges, body_to_idx)
+
+    print("Computing neurotransmitter signs ...")
+    nt_vec, sign_vec = _build_nt_tensors(neurotransmitters, all_bodies)
+
+    print("Building adjacency matrices ...")
+    adj = _build_adjacency_matrix(
+        edge_pre_idx, edge_post_idx, edge_weights, num_neurons=len(all_bodies)
+    )
+
+    print("Building soma coordinates ...")
+    soma_xyz = _build_soma_coordinates(annotations, all_bodies)
+    soma_xyz_valid = ~torch.isnan(soma_xyz).any(dim=-1)
+
+    print("Building edge delay vector ...")
+    edge_delay_vec = _build_edge_delay_vector(edge_pre_idx, edge_post_idx, soma_xyz, soma_xyz_valid)
+
+    print("Encoding annotations ...")
+    annotation_tensors = _build_annotation_tensors(annotations, all_bodies)
+
+    return {
+        "adj": adj,  # Sparse adjacency matrix between neurons
+        "edge_pre_idx": edge_pre_idx,  # The starting neurons of each edge
+        "edge_post_idx": edge_post_idx,  # The ending neurons of each edge
+        "edge_weights": edge_weights,  # The synapse counts for each edge
+        "edge_delay_vec": edge_delay_vec,  # The delay of each edge in ms
+        "nt_vec": nt_vec,  # A vector of neurotransmitter values, indexed for each neuron
+        "sign_vec": sign_vec,  # A vector of neurotransmitter signs
+        "body_ids": torch.tensor(all_bodies.values, dtype=torch.int64),  # The body ids of each neuron
+        "N": len(all_bodies),  # The number of neurons in the data
+        "soma_xyz": soma_xyz,  # A vector of 3D neuron coordinates
+        "soma_xyz_valid": soma_xyz_valid,  # A NaN mask for whether a neuron has valid coordinates
+        **annotation_tensors,
+        "meta": {
+            "dataset": "male-cns:v1.0",
+        },
+    }
