@@ -404,6 +404,8 @@ def build_tensors(paths: dict[str, Path], superclasses: list[str] | None = None,
 
 
 def list_selectors(list_class: str, feather_dir: Path):
+    """Lists the available annodations of the given class."""
+
     ann_path = feather_dir / ESSENTIAL_FILES["annotations"]
     if not ann_path.exists():
         download_file(f"{BASE_URL}/{ESSENTIAL_FILES['annotations']}", ann_path)

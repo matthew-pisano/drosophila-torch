@@ -185,7 +185,6 @@ class DrosophilaLIF(nn.Module):
         Args:
             timestep: Current timestep index (used to index spike buffer).
             current_in: External input current per neuron.
-
         Returns:
             spikes: A tensor representing neuron spikes, 1.0 where a neuron fired, else 0.0.
             voltage: Membrane voltage per neuron after this step."""
@@ -241,7 +240,6 @@ class DrosophilaLIF(nn.Module):
         Args:
             current_in: External input current per neuron.
             stdp: If provided, weights are updated at each timestep using local spike timing. If None, weights are frozen.
-
         Returns:
             A tuple of float spike trains and float membrane voltages"""
 
@@ -286,7 +284,6 @@ def mean_firing_rate(spikes: torch.Tensor, dt: float = 1.0) -> torch.Tensor:
     Args:
         spikes: float spike tensor.
         dt: Timestep duration in ms.
-
     Returns:
         The mean firing rate in Hz."""
 
