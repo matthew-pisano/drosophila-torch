@@ -10,6 +10,8 @@ from dataclasses import dataclass
 import torch
 import torch.nn as nn
 
+from drosophila_torch.neurotransmitters import NTType
+
 
 @dataclass
 class LIFConfig:
@@ -94,17 +96,32 @@ class STDPRule:
         self.trace.zero_()
 
     @torch.no_grad()
-    def step(self, spikes: torch.Tensor, edge_pre: torch.Tensor, edge_post: torch.Tensor, W: nn.Parameter) -> None:
+    def step(self, spikes: torch.Tensor, edge_pre: torch.Tensor, edge_post: torch.Tensor, nt_vec: torch.Tensor, W: nn.Parameter) -> None:
         """Update trace and apply weight changes for one timestep.
 
         Args:
             spikes: Spike vector for network neurons.
             edge_pre: Pre-synaptic neuron index for each edge.
             edge_post: Post-synaptic neuron index for each edge.
+            nt_vec: The neurotransmitter vector for each neuron.
             W: Synaptic weight parameter to update in-place."""
 
         # Decay traces
         self.trace = self.trace * (1.0 - self.alpha) + spikes
+
+        # Modulatory signal: mean activity of dopaminergic neurons
+        # Acts as a global or region-specific learning rate scale
+        da_mask = nt_vec == NTType.DOPAMINE
+        # Measures how active dopaminergic are
+        da_signal = spikes[da_mask].mean()
+
+        # Only ionotropic edges undergo classic STDP
+        edge_nt = nt_vec[edge_pre]
+        ionotropic = (
+                (edge_nt == NTType.ACETYLCHOLINE) |
+                (edge_nt == NTType.GABA) |
+                (edge_nt == NTType.GLUTAMATE)
+        )
 
         # Per-edge: LTP when post fires (pre trace captures recent pre activity)
         dW_plus = self.a_plus * self.trace[edge_post] * self.trace[edge_pre]
@@ -112,7 +129,10 @@ class STDPRule:
         # Per-edge: LTD when pre fires (post trace captures recent post activity)
         dW_minus = self.a_minus * self.trace[edge_pre] * self.trace[edge_post]
 
-        W.data.add_(dW_plus - dW_minus)
+        # Dopamine gates the magnitude of plasticity
+        dW = (dW_plus - dW_minus) * ionotropic.float() * (1.0 + da_signal)
+
+        W.data.add_(dW)
         W.data.clamp_(min=self.w_min, max=self.w_max)
 
 
