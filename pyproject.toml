@@ -1,7 +1,14 @@
 [project]
-name = "drosophila-torch"
+name = "drosophila_torch"
 version = "0.1.0"
 requires-python = ">=3.14"
+authors = [
+    { name = "Matthew Pisano", email = "matthewpisano14@gmail.com" }
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
 dependencies = [
     "matplotlib>=3.11.2",
     "pandas>=3.0.6",
@@ -10,3 +17,10 @@ dependencies = [
     "torch>=2.14.0",
     "tqdm>=4.70.1",
 ]
+
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
