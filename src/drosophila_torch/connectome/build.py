@@ -1,5 +1,6 @@
 """Converts raw Janelia GCS files to PyTorch tensors."""
 
+import logging
 from pathlib import Path
 
 import numpy as np
@@ -8,6 +9,9 @@ import torch
 from tqdm import tqdm
 
 from drosophila_torch.neurotransmitters import NTType
+
+
+logger = logging.getLogger(__name__)
 
 
 def _load_feathers(paths: dict[str, Path]) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
@@ -59,7 +63,7 @@ def _filter_neurons(
         edges["body_pre"].isin(surviving) & edges["body_post"].isin(surviving)
         ]
 
-    print(f"Filtered to {len(annotations):,} neurons, {len(edges):,} edges")
+    logger.info(f"Filtered to {len(annotations):,} neurons, {len(edges):,} edges")
     return edges, annotations
 
 
@@ -95,7 +99,7 @@ def _build_neuron_index(edges: pd.DataFrame, annotations: pd.DataFrame) -> tuple
     del unique_array
 
     body_to_idx = pd.Series(np.arange(len(all_bodies), dtype=np.int64), index=all_bodies)
-    print(f"Total neurons: {len(all_bodies):,}")
+    logger.info(f"Total neurons: {len(all_bodies):,}")
     return all_bodies, body_to_idx
 
 
@@ -126,7 +130,7 @@ def _build_edge_tensors(edges: pd.DataFrame, body_to_idx: pd.Series) -> tuple[to
             )
             pbar.update(end - start)
 
-    print(f"Total edges: {num_edges:,}")
+    logger.info(f"Total edges: {num_edges:,}")
     return edge_pre_idx, edge_post_idx, edge_weights
 
 
@@ -269,7 +273,7 @@ def _build_annotation_tensors(annotations: pd.DataFrame, all_bodies: pd.Index) -
         codes, labels = _encode_categorical(aligned_series)
         result[f"{key}_ids"] = codes
         result[f"{key}_labels"] = labels
-        print(f"{key}: {len(labels)} categories")
+        logger.info(f"{key}: {len(labels)} categories")
 
     return result
 
@@ -280,33 +284,33 @@ def build(paths: dict[str, Path], superclasses: list[str] | None = None, types: 
     Loads the three source files, builds the neuron index, edge tensors, sign vector, adjacency matrices, and annotation
     tensors, then packs everything into a single dict for torch.save()."""
 
-    print("\nLoading feather files ...")
+    logger.info("Loading feather files ...")
     edges, annotations, neurotransmitters = _load_feathers(paths)
 
     edges, annotations = _filter_neurons(edges, annotations, superclasses=superclasses, types=types)
 
-    print("Building neuron index ...")
+    logger.info("Building neuron index ...")
     all_bodies, body_to_idx = _build_neuron_index(edges, annotations)
 
-    print("Building edge tensors ...")
+    logger.info("Building edge tensors ...")
     edge_pre_idx, edge_post_idx, edge_weights = _build_edge_tensors(edges, body_to_idx)
 
-    print("Computing neurotransmitter signs ...")
+    logger.info("Computing neurotransmitter signs ...")
     nt_vec, sign_vec = _build_nt_tensors(neurotransmitters, all_bodies)
 
-    print("Building adjacency matrices ...")
+    logger.info("Building adjacency matrices ...")
     adj = _build_adjacency_matrix(
         edge_pre_idx, edge_post_idx, edge_weights, num_neurons=len(all_bodies)
     )
 
-    print("Building soma coordinates ...")
+    logger.info("Building soma coordinates ...")
     soma_xyz = _build_soma_coordinates(annotations, all_bodies)
     soma_xyz_valid = ~torch.isnan(soma_xyz).any(dim=-1)
 
-    print("Building edge delay vector ...")
+    logger.info("Building edge delay vector ...")
     edge_delay_vec = _build_edge_delay_vector(edge_pre_idx, edge_post_idx, soma_xyz, soma_xyz_valid)
 
-    print("Encoding annotations ...")
+    logger.info("Encoding annotations ...")
     annotation_tensors = _build_annotation_tensors(annotations, all_bodies)
 
     return {

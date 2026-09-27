@@ -27,6 +27,7 @@ class NTType(IntEnum):
 
     def to_string(self) -> str:
         return {
+            NTType.UNKNOWN: "unknown",
             NTType.ACETYLCHOLINE: "acetylcholine",
             NTType.GABA: "gaba",
             NTType.GLUTAMATE: "glutamate",
@@ -44,4 +45,4 @@ class NTType(IntEnum):
             "dopamine": NTType.DOPAMINE,
             "serotonin": NTType.SEROTONIN,
             "octopamine": NTType.OCTOPAMINE,
-        }[string]
+        }.get(string, NTType.UNKNOWN)

@@ -7,7 +7,11 @@ from pathlib import Path
 import pandas as pd
 import torch
 
+import drosophila_torch
 from drosophila_torch.connectome import download, build
+
+
+drosophila_torch.enable_logging()
 
 
 def list_selectors(list_class: str, feather_dir: Path):

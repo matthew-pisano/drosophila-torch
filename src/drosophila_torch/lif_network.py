@@ -5,12 +5,16 @@ approximation. With these fixed as constants, the neuron optimizes the synaptic 
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 import torch
 import torch.nn as nn
 
 from drosophila_torch.neurotransmitters import NTType
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass

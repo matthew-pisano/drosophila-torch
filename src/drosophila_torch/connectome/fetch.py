@@ -1,11 +1,14 @@
 """Downloads the MaleCNS (Drosophila male CNS connectome) flat-connectome files from the Janelia GCS bucket and converts
 them to PyTorch tensors."""
 
+import logging
 from pathlib import Path
 
 import requests
 from tqdm import tqdm
 
+
+logger = logging.getLogger(__name__)
 
 _BASE_URL = (
     "https://storage.googleapis.com/flyem-male-cns"
@@ -22,7 +25,7 @@ _ESSENTIAL_FILES = {
 def _download_file(url: str, dest: Path, chunk_size: int = 1 << 20) -> None:
     """Stream-download url to dest."""
 
-    print(f"Downloading {dest.name} ...")
+    logger.info(f"Downloading {dest.name} ...")
     with requests.get(url, stream=True, timeout=60) as req:
         req.raise_for_status()
         total_bytes = int(req.headers.get("content-length", 0))

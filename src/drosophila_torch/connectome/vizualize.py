@@ -3,9 +3,14 @@
 Each point is a neuron soma, colored by superclass. Neurons without a soma location are skipped. Coordinates are in
 voxel units at 8nm resolution."""
 
+import logging
+
 import matplotlib.pyplot as plt
 import torch
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
+
+
+logger = logging.getLogger(__name__)
 
 
 def _plot_soma_locations(ax: plt.Axes, data: dict, colormap, num_classes: int, modulo_filter: int = 1) -> torch.Tensor:
@@ -16,7 +21,7 @@ def _plot_soma_locations(ax: plt.Axes, data: dict, colormap, num_classes: int, m
     Returns:
         The valid soma coordinates after NaN filtering, for use in computing axis limits."""
 
-    print("Plotting soma locations ...")
+    logger.info("Plotting soma locations ...")
     soma_xyz = data["soma_xyz"]
     superclass_ids = data["superclass_ids"]
 
@@ -45,7 +50,7 @@ def _plot_edges(ax: plt.Axes, data: dict, sample_proportion: float, colormap, nu
     Extracts pre- / post-indices from the sparse CSR adjacency matrix, samples a proportion of them, then looks up soma
     coordinates for each endpoint. Edges where either endpoint has no soma location are skipped."""
 
-    print("Extracting edges from sparse matrix ...")
+    logger.info("Extracting edges from sparse matrix ...")
     adj_coo = data["adj"].to_sparse_coo().coalesce()
     pre_idx = adj_coo.indices()[0]
     post_idx = adj_coo.indices()[1]
@@ -69,7 +74,7 @@ def _plot_edges(ax: plt.Axes, data: dict, sample_proportion: float, colormap, nu
     pre_coords = pre_coords[valid]
     post_coords = post_coords[valid]
 
-    print(f"Drawing {valid.sum():,} edges (sampled {num_samples:,} from {num_edges:,})")
+    logger.info(f"Drawing {valid.sum():,} edges (sampled {num_samples:,} from {num_edges:,})")
 
     # Build segment list for Line3DCollection: each segment is [[x0,y0,z0],[x1,y1,z1]]
     segments = torch.stack([pre_coords, post_coords], dim=1).numpy()
