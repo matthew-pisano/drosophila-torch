@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 
 import torch
+from tqdm import tqdm
 
 from drosophila_torch.neurons.superclass import NeuronSuperclass
 from drosophila_torch.simulation.lif_network import LIFConfig, DrosophilaLIF, STDPRule
@@ -76,7 +77,9 @@ def main() -> None:
     superclasses = [NeuronSuperclass.from_string(s) for s in args.superclass]
     s_mask = superclass_mask(data["superclass_ids"], superclasses).to(device)
 
-    spikes, voltages = simulate(model, stdp, s_mask, duration_ms=args.duration, rate_hz=args.rate, config=config, device=device)
+    pbar = tqdm(desc="Simulation time", total=args.duration, unit="ms")
+    spikes, voltages = simulate(model, stdp, s_mask, duration_ms=args.duration, rate_hz=args.rate, config=config,
+                                device=device, on_step=lambda: pbar.update(config.dt))
 
     rates = _mean_firing_rate(spikes, config.dt)
     print(

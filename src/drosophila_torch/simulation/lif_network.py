@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from typing import Callable
 
 import torch
 import torch.nn as nn
@@ -256,12 +257,13 @@ class DrosophilaLIF(nn.Module):
 
         return spikes, self.mem_voltage
 
-    def run(self, current_in: torch.Tensor, stdp: STDPRule | None = None) -> tuple[torch.Tensor, torch.Tensor]:
+    def run(self, current_in: torch.Tensor, stdp: STDPRule | None = None, on_step: Callable | None = None) -> tuple[torch.Tensor, torch.Tensor]:
         """Run the simulation for total_timesteps.
 
         Args:
             current_in: External input current per neuron.
             stdp: If provided, weights are updated at each timestep using local spike timing. If None, weights are frozen.
+            on_step: An optional callback which fires at the beginning of a timestep.
         Returns:
             A tuple of spike trains and membrane voltages at each time step."""
 
@@ -274,6 +276,8 @@ class DrosophilaLIF(nn.Module):
         voltage_record = torch.zeros(total_timesteps, self.mem_voltage.shape[0], device=self.mem_voltage.device)
 
         for t in range(total_timesteps):
+            on_step()  # Fire callback
+
             spikes, voltage = self.forward(t, current_in[t])
             spike_record[t] = spikes
 

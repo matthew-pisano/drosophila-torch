@@ -6,6 +6,7 @@ Output is the full spike record across all neurons."""
 from __future__ import annotations
 
 import logging
+from typing import Callable
 
 import torch
 
@@ -41,6 +42,7 @@ def simulate(
         rate_hz: float = 10.0,
         config: LIFConfig = LIFConfig(),
         device: torch.device | None = None,
+        on_step: Callable | None = None
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Load connectome data, build model, and run simulation.
 
@@ -52,6 +54,7 @@ def simulate(
         rate_hz: Poisson input rate for sensory neurons in Hz.
         config: LIF configuration.
         device: Target device.
+        on_step: An optional callback which fires at the beginning of a simulation timestep.
     Returns:
         A tuple of spike trains and membrane voltages at each time step."""
 
@@ -72,6 +75,6 @@ def simulate(
         f"with {n_selected:,} sensory neurons at {rate_hz:.1f} Hz"
     )
 
-    spikes, voltages = model.run(current_in, stdp=stdp)
+    spikes, voltages = model.run(current_in, stdp=stdp, on_step=on_step)
 
     return spikes, voltages
