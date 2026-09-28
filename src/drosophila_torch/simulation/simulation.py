@@ -50,64 +50,37 @@ def _superclass_mask(superclass_ids: torch.Tensor, superclasses: list[NeuronSupe
 
 
 def run(
-        data_path: Path,
+        model: DrosophilaLIF,
+        stdp: STDPRule | None = None,
         duration_ms: float = 1000.0,
         rate_hz: float = 10.0,
-        use_stdp: bool = True,
         config: LIFConfig = LIFConfig(),
         device: torch.device | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Load connectome data, build model, and run simulation.
 
     Args:
-        data_path: Path to the .pt file produced by the preprocessing script.
+        model: The LIF neural network to model.
+        stdp: The updating rule for the neurons in the network.
         duration_ms: Simulation duration in ms.
         rate_hz: Poisson input rate for sensory neurons in Hz.
-        use_stdp: Whether to enable STDP weight updates during the run.
         config: LIF configuration.
         device: Target device.
     Returns:
         A tuple of spike trains and membrane voltages at each time step."""
 
-    if device is None:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    logger.info(f"Device: {device}")
-
-    logger.info(f"Loading connectome tensors from {data_path}")
-    data = torch.load(data_path, map_location=device)
-    logger.info(f"Neurons: {data['N']:,}  Edges: {data['meta']['num_edges']:,}")
-
-    model = DrosophilaLIF(
-        edge_pre=data["edge_pre_idx"].to(device),
-        edge_post=data["edge_post_idx"].to(device),
-        edge_delay=data["edge_delay_vec"].to(device),
-        edge_weights=data["edge_weights"].to(device),
-        sign_vec=data["sign_vec"].to(device),
-        nt_vec=data["nt_vec"].to(device),
-        total_neurons=data["N"],
-        config=config,
-    ).to(device)
-
-    stdp = STDPRule(
-        n_neurons=model.mem_voltage.shape[0],
-        dt=config.dt,
-        device=device,
-    ) if use_stdp else None
-
-    N = data["N"]
-    T = int(duration_ms / config.dt)
-    s_mask = _superclass_mask(data).to(device)
+    total_timesteps = int(duration_ms / config.dt)
+    s_mask = _superclass_mask().to(device)
     n_selected = s_mask.sum().item()
 
     # Generate Poisson input only for selected neurons, zero elsewhere
-    rate_per_step = torch.full((T, n_selected), rate_hz * config.dt * 1e-3, device=device)
+    rate_per_step = torch.full((total_timesteps, n_selected), rate_hz * config.dt * 1e-3, device=device)
     sensory_input = torch.poisson(rate_per_step).clamp(max=1.0)
-    current_in = torch.zeros(T, N, device=device)
+    current_in = torch.zeros(total_timesteps, len(model.nt_vec), device=device)
     current_in[:, s_mask] = sensory_input
 
     logger.info(
-        f"Running {T} timesteps ({duration_ms:.0f} ms) "
+        f"Running {total_timesteps} timesteps ({duration_ms:.0f} ms) "
         f"with {n_selected:,} sensory neurons at {rate_hz:.1f} Hz"
     )
 
@@ -136,17 +109,33 @@ def main() -> None:
                         help="Device string e.g. 'cuda:0' or 'cpu'")
     args = parser.parse_args()
 
-    config = LIFConfig(dt=args.dt)
-    device = torch.device(args.device) if args.device else None
+    device = args.device
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    spikes, voltages = run(
-        data_path=args.data_path,
-        duration_ms=args.duration,
-        rate_hz=args.rate,
-        use_stdp=not args.frozen,
+    logger.info(f"Loading connectome tensors from {args.data_path}")
+    data = torch.load(args.data_path, map_location=device)
+    logger.info(f"Neurons: {len(data['nt_vec']):,}  Edges: {len(data['edge_pre_idx']):,}")
+
+    config = LIFConfig(dt=args.dt)
+
+    model = DrosophilaLIF(
+        edge_pre=data["edge_pre_idx"].to(device),
+        edge_post=data["edge_post_idx"].to(device),
+        edge_delay=data["edge_delay_vec"].to(device),
+        edge_weights=data["edge_weights"].to(device),
+        sign_vec=data["sign_vec"].to(device),
+        nt_vec=data["nt_vec"].to(device),
         config=config,
+    ).to(device)
+
+    stdp = STDPRule(
+        n_neurons=model.mem_voltage.shape[0],
+        dt=config.dt,
         device=device,
-    )
+    ) if not args.frozen else None
+
+    spikes, voltages = run(model, stdp, duration_ms=args.duration, rate_hz=args.rate, config=config, device=device)
 
     rates = _mean_firing_rate(spikes, config.dt)
     logger.info(

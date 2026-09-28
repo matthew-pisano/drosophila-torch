@@ -322,7 +322,6 @@ def build(paths: dict[str, Path], superclasses: list[str] | None = None, types: 
         "nt_vec": nt_vec,  # A vector of neurotransmitter values, indexed for each neuron
         "sign_vec": sign_vec,  # A vector of neurotransmitter signs
         "body_ids": torch.tensor(all_bodies.values, dtype=torch.int64),  # The body ids of each neuron
-        "N": len(all_bodies),  # The number of neurons in the data
         "soma_xyz": soma_xyz,  # A vector of 3D neuron coordinates
         "soma_xyz_valid": soma_xyz_valid,  # A NaN mask for whether a neuron has valid coordinates
         **annotation_tensors,

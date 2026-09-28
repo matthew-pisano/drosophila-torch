@@ -157,7 +157,6 @@ class DrosophilaLIF(nn.Module):
         edge_weights: The strength of edges.
         sign_vec: A vector of signal signs for each neuron, excitatory or inhibitory.
         nt_vec: A vector of neuron types for each neuron.
-        total_neurons: The total number of neurons in the network.
         config: LIFConfig instance controlling biophysical and simulation  parameters. Defaults to LIFConfig()."""
 
     def __init__(self,
@@ -167,11 +166,10 @@ class DrosophilaLIF(nn.Module):
                  edge_weights: torch.Tensor,
                  sign_vec: torch.Tensor,
                  nt_vec: torch.Tensor,
-                 total_neurons: int,
                  config: LIFConfig = LIFConfig()) -> None:
         super().__init__()
         self.config = config
-        N = total_neurons
+        n_neurons = len(nt_vec)
 
         self.register_buffer("edge_pre", edge_pre)
         self.register_buffer("edge_post", edge_post)
@@ -188,13 +186,13 @@ class DrosophilaLIF(nn.Module):
         self.max_delay = max_delay
 
         # The cross membrane voltage of each neuron.
-        self.register_buffer("mem_voltage", torch.full((N,), config.v_rest))
+        self.register_buffer("mem_voltage", torch.full((n_neurons,), config.v_rest))
 
         # The remaining refractory steps per neuron.
-        self.register_buffer("refractory_remaining", torch.zeros(N, dtype=torch.long))
+        self.register_buffer("refractory_remaining", torch.zeros(n_neurons, dtype=torch.long))
 
         # A circular buffer of past spike trains.
-        self.register_buffer("spike_buf", torch.zeros(max_delay + 1, N))
+        self.register_buffer("spike_buf", torch.zeros(max_delay + 1, n_neurons))
 
     def reset_state(self) -> None:
         """Reset all dynamic state to initial conditions. Call at the start of each trial or epoch."""
@@ -259,7 +257,7 @@ class DrosophilaLIF(nn.Module):
         return spikes, self.mem_voltage
 
     def run(self, current_in: torch.Tensor, stdp: STDPRule | None = None) -> tuple[torch.Tensor, torch.Tensor]:
-        """Run the simulation for T timesteps.
+        """Run the simulation for total_timesteps.
 
         Args:
             current_in: External input current per neuron.
@@ -267,35 +265,26 @@ class DrosophilaLIF(nn.Module):
         Returns:
             A tuple of spike trains and membrane voltages at each time step."""
 
-        T = current_in.shape[0]
+        total_timesteps = current_in.shape[0]
         self.reset_state()
         if stdp is not None:
             stdp.reset()
 
-        spike_record = torch.zeros(T, self.mem_voltage.shape[0], device=self.mem_voltage.device)
-        voltage_record = torch.zeros(T, self.mem_voltage.shape[0], device=self.mem_voltage.device)
+        spike_record = torch.zeros(total_timesteps, self.mem_voltage.shape[0], device=self.mem_voltage.device)
+        voltage_record = torch.zeros(total_timesteps, self.mem_voltage.shape[0], device=self.mem_voltage.device)
 
-        for t in range(T):
+        for t in range(total_timesteps):
             spikes, voltage = self.forward(t, current_in[t])
             spike_record[t] = spikes
 
             voltage_record[t] = voltage
 
             if stdp is not None:
-                # Retrieve the pre-synaptic spikes that were active this step
-                buf_idx = (t - self.edge_delay) % (self.max_delay + 1)
-                pre_spikes = self.spike_buf[buf_idx, self.edge_pre]
-
-                # Aggregate pre-synaptic activity back to neuron level for traces
-                pre_neuron_spikes = torch.zeros_like(spikes)
-                pre_neuron_spikes.scatter_add_(0, self.edge_pre, pre_spikes)
-                pre_neuron_spikes = pre_neuron_spikes.clamp(max=1.0)
-
                 stdp.step(
-                    pre_spikes=pre_neuron_spikes,
-                    post_spikes=spikes,
+                    spikes=spikes,
                     edge_pre=self.edge_pre,
                     edge_post=self.edge_post,
+                    nt_vec=self.nt_vec,
                     W=self.W,
                 )
 
