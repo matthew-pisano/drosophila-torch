@@ -289,3 +289,13 @@ class DrosophilaLIF(nn.Module):
                 )
 
         return spike_record, voltage_record
+
+    def neuron_count(self):
+        """The number of neurons in the network."""
+
+        return len(self.nt_vec)
+
+    def edge_count(self):
+        """The number of edges in the network."""
+
+        return len(self.edge_pre)

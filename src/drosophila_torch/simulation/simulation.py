@@ -72,7 +72,7 @@ def run(
         A tuple of spike trains and membrane voltages at each time step."""
 
     if input_mask is None:
-        input_mask = torch.ones(len(model.nt_vec), dtype=torch.bool)
+        input_mask = torch.ones(model.neuron_count(), dtype=torch.bool)
 
     total_timesteps = int(duration_ms / config.dt)
     n_selected = input_mask.sum().item()
@@ -80,7 +80,7 @@ def run(
     # Generate Poisson input only for selected neurons, zero elsewhere
     rate_per_step = torch.full((total_timesteps, n_selected), rate_hz * config.dt * 1e-3, device=device)
     artificial_input = torch.poisson(rate_per_step).clamp(max=1.0)
-    current_in = torch.zeros(total_timesteps, len(model.nt_vec), device=device)
+    current_in = torch.zeros(total_timesteps, model.neuron_count(), device=device)
     current_in[:, input_mask] = artificial_input
 
     logger.info(
@@ -121,7 +121,6 @@ def main() -> None:
 
     logger.info(f"Loading connectome tensors from {args.data_path}")
     data = torch.load(args.data_path, map_location=device)
-    logger.info(f"Neurons: {len(data['nt_vec']):,}  Edges: {len(data['edge_pre_idx']):,}")
 
     config = LIFConfig(dt=args.dt)
 
@@ -134,6 +133,8 @@ def main() -> None:
         nt_vec=data["nt_vec"].to(device),
         config=config,
     ).to(device)
+
+    logger.info(f"Neurons: {model.neuron_count():,}  Edges: {model.edge_count():,}")
 
     stdp = STDPRule(
         n_neurons=model.mem_voltage.shape[0],
