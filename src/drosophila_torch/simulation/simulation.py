@@ -30,7 +30,6 @@ def superclass_mask(superclass_ids: torch.Tensor, superclasses: list[NeuronSuper
     for sc in superclasses:
         mask |= superclass_ids == sc.value
 
-    logger.info(f"Selected neurons: {mask.sum().item():,} / {len(superclass_ids):,}")
     return mask
 
 
@@ -63,6 +62,8 @@ def simulate(
 
     total_timesteps = int(duration_ms / config.dt)
     n_selected = input_mask.sum().item()
+
+    logger.info(f"Selected neurons for stimulation: {n_selected:,} / {model.neuron_count():,}")
 
     # Generate Poisson input only for selected neurons, zero elsewhere
     rate_per_step = torch.full((total_timesteps, n_selected), rate_hz * config.dt * 1e-3, device=device)

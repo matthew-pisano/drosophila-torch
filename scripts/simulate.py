@@ -6,9 +6,13 @@ from pathlib import Path
 import torch
 from tqdm import tqdm
 
+import drosophila_torch
 from drosophila_torch.neurons.superclass import NeuronSuperclass
 from drosophila_torch.simulation.lif_network import LIFConfig, DrosophilaLIF, STDPRule
 from drosophila_torch.simulation.simulation import superclass_mask, simulate
+
+
+drosophila_torch.enable_logging()
 
 
 def _mean_firing_rate(spikes: torch.Tensor, dt: float = 1.0) -> torch.Tensor:
@@ -74,8 +78,11 @@ def main() -> None:
         device=device,
     ) if not args.frozen else None
 
-    superclasses = [NeuronSuperclass.from_string(s) for s in args.superclass]
-    s_mask = superclass_mask(data["superclass_ids"], superclasses).to(device)
+    if args.superclass:
+        superclasses = [NeuronSuperclass.from_string(s) for s in args.superclass]
+        s_mask = superclass_mask(data["superclass_ids"], superclasses).to(device)
+    else:
+        s_mask = None
 
     pbar = tqdm(desc="Simulation time", total=args.duration, unit="ms")
     spikes, voltages = simulate(model, stdp, s_mask, duration_ms=args.duration, rate_hz=args.rate, config=config,
@@ -83,7 +90,7 @@ def main() -> None:
 
     rates = _mean_firing_rate(spikes, config.dt)
     print(
-        f"Mean firing rate: {rates.mean().item():.2f} Hz  "
+        f"\nMean firing rate: {rates.mean().item():.2f} Hz  "
         f"Max: {rates.max().item():.2f} Hz  "
         f"Active neurons: {(rates > 0).sum().item():,}"
     )
