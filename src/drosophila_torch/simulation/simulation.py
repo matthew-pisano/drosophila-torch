@@ -52,6 +52,7 @@ def _superclass_mask(superclass_ids: torch.Tensor, superclasses: list[NeuronSupe
 def run(
         model: DrosophilaLIF,
         stdp: STDPRule | None = None,
+        input_mask: torch.Tensor | None = None,
         duration_ms: float = 1000.0,
         rate_hz: float = 10.0,
         config: LIFConfig = LIFConfig(),
@@ -62,6 +63,7 @@ def run(
     Args:
         model: The LIF neural network to model.
         stdp: The updating rule for the neurons in the network.
+        input_mask: A mask for which neurons to omit from artificial stimulation.
         duration_ms: Simulation duration in ms.
         rate_hz: Poisson input rate for sensory neurons in Hz.
         config: LIF configuration.
@@ -69,15 +71,17 @@ def run(
     Returns:
         A tuple of spike trains and membrane voltages at each time step."""
 
+    if input_mask is None:
+        input_mask = torch.ones(len(model.nt_vec), dtype=torch.bool)
+
     total_timesteps = int(duration_ms / config.dt)
-    s_mask = _superclass_mask().to(device)
-    n_selected = s_mask.sum().item()
+    n_selected = input_mask.sum().item()
 
     # Generate Poisson input only for selected neurons, zero elsewhere
     rate_per_step = torch.full((total_timesteps, n_selected), rate_hz * config.dt * 1e-3, device=device)
-    sensory_input = torch.poisson(rate_per_step).clamp(max=1.0)
+    artificial_input = torch.poisson(rate_per_step).clamp(max=1.0)
     current_in = torch.zeros(total_timesteps, len(model.nt_vec), device=device)
-    current_in[:, s_mask] = sensory_input
+    current_in[:, input_mask] = artificial_input
 
     logger.info(
         f"Running {total_timesteps} timesteps ({duration_ms:.0f} ms) "
@@ -95,6 +99,8 @@ def main() -> None:
     )
     parser.add_argument("data_path", type=Path,
                         help="Path to the connectome .pt file")
+    parser.add_argument("--superclass", nargs="+", default=None,
+                        help="Filter input to one or more superclasses e.g. --superclass descending_neuron visual_projection")
     parser.add_argument("--duration", type=float, default=1000.0,
                         help="Simulation duration in ms (default: 1000)")
     parser.add_argument("--rate", type=float, default=10.0,
@@ -135,7 +141,10 @@ def main() -> None:
         device=device,
     ) if not args.frozen else None
 
-    spikes, voltages = run(model, stdp, duration_ms=args.duration, rate_hz=args.rate, config=config, device=device)
+    superclasses = [NeuronSuperclass.from_string(s) for s in args.superclass]
+    s_mask = _superclass_mask(data["superclass_ids"], superclasses).to(device)
+
+    spikes, voltages = run(model, stdp, s_mask, duration_ms=args.duration, rate_hz=args.rate, config=config, device=device)
 
     rates = _mean_firing_rate(spikes, config.dt)
     logger.info(
