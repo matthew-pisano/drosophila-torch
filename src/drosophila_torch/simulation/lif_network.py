@@ -11,7 +11,7 @@ from dataclasses import dataclass
 import torch
 import torch.nn as nn
 
-from drosophila_torch.simulation.neurotransmitters import NTType
+from drosophila_torch.neurons import NTType
 
 
 logger = logging.getLogger(__name__)

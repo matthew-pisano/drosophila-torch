@@ -5,9 +5,9 @@ from pathlib import Path
 
 import torch
 
+from drosophila_torch.neurons.superclass import NeuronSuperclass
 from drosophila_torch.simulation.lif_network import LIFConfig, DrosophilaLIF, STDPRule
 from drosophila_torch.simulation.simulation import superclass_mask, simulate
-from drosophila_torch.simulation.superclass import NeuronSuperclass
 
 
 def _mean_firing_rate(spikes: torch.Tensor, dt: float = 1.0) -> torch.Tensor:

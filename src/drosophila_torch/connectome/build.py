@@ -8,7 +8,7 @@ import pandas as pd
 import torch
 from tqdm import tqdm
 
-from drosophila_torch.simulation.neurotransmitters import NTType
+from drosophila_torch.neurons.neurotransmitters import NTType
 
 
 logger = logging.getLogger(__name__)

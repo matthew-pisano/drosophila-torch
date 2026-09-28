@@ -9,8 +9,8 @@ import logging
 
 import torch
 
+from drosophila_torch.neurons import NeuronSuperclass
 from drosophila_torch.simulation.lif_network import DrosophilaLIF, LIFConfig, STDPRule
-from drosophila_torch.simulation.superclass import NeuronSuperclass
 
 
 logger = logging.getLogger(__name__)
