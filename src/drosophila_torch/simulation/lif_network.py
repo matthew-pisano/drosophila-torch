@@ -265,7 +265,7 @@ class DrosophilaLIF(nn.Module):
             current_in: External input current per neuron.
             stdp: If provided, weights are updated at each timestep using local spike timing. If None, weights are frozen.
         Returns:
-            A tuple of float spike trains and float membrane voltages"""
+            A tuple of spike trains and membrane voltages at each time step."""
 
         T = current_in.shape[0]
         self.reset_state()
