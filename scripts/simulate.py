@@ -3,6 +3,8 @@
 import argparse
 from pathlib import Path
 
+import matplotlib.gridspec as gridspec
+import matplotlib.pyplot as plt
 import torch
 from tqdm import tqdm
 
@@ -13,6 +15,59 @@ from drosophila_torch.simulation.simulation import superclass_mask, simulate
 
 
 drosophila_torch.enable_logging()
+
+
+def plot_simulation_(external_voltage: torch.Tensor, spikes: torch.Tensor, voltages: torch.Tensor, config: LIFConfig) -> None:
+    """Plot mean firing rate and mean membrane voltage over time.
+
+    Args:
+        external_voltage: External input voltage to selected neurons.
+        spikes: Spike tensor over time.
+        voltages: Voltage tensor over time.
+        config: The LIF config used for simulation."""
+
+    T = spikes.shape[0]
+    time_ms = torch.arange(T).float() * config.dt
+
+    # Mean-reduce over neurons
+    mean_input_voltage = external_voltage.mean(dim=1).cpu()
+    mean_spike_rate = (spikes.mean(dim=1) / (config.dt * 1e-3)).cpu()
+    mean_internal_voltage = voltages.mean(dim=1).cpu()
+
+    fig = plt.figure(figsize=(12, 6))
+    gs = gridspec.GridSpec(3, 1, hspace=0.6)
+
+    # Input voltage
+    ax_input_volt = fig.add_subplot(gs[0])
+    ax_input_volt.plot(time_ms, mean_input_voltage, linewidth=0.8, color="green")
+    ax_input_volt.set_ylabel("Mean input voltage (mV)")
+    ax_input_volt.set_xlabel("Time (ms)")
+    ax_input_volt.set_title("Input neuron mean external voltage")
+    ax_input_volt.set_xlim(0, time_ms[-1].item())
+
+    # Firing rate
+    ax_rate = fig.add_subplot(gs[1])
+    ax_rate.plot(time_ms, mean_spike_rate, linewidth=0.8, color="steelblue")
+    ax_rate.set_ylabel("Mean firing rate (Hz)")
+    ax_rate.set_xlabel("Time (ms)")
+    ax_rate.set_title("Population mean firing rate")
+    ax_rate.set_xlim(0, time_ms[-1].item())
+
+    # Membrane voltage
+    ax_internal_volt = fig.add_subplot(gs[2])
+    ax_internal_volt.plot(time_ms, mean_internal_voltage, linewidth=0.8, color="darkorange")
+    ax_internal_volt.axhline(config.v_thresh, linestyle="--", linewidth=0.8,
+                             color="red", label=f"Threshold ({config.v_thresh} mV)")
+    ax_internal_volt.axhline(config.v_rest, linestyle="--", linewidth=0.8,
+                             color="gray", label=f"Rest ({config.v_rest} mV)")
+    ax_internal_volt.set_ylabel("Mean membrane voltage (mV)")
+    ax_internal_volt.set_xlabel("Time (ms)")
+    ax_internal_volt.set_title("Population mean membrane voltage")
+    ax_internal_volt.set_xlim(0, time_ms[-1].item())
+    ax_internal_volt.legend(fontsize=8)
+
+    plt.show()
+    plt.close(fig)
 
 
 def _mean_firing_rate(spikes: torch.Tensor, dt: float = 1.0) -> torch.Tensor:
@@ -41,6 +96,8 @@ def main() -> None:
                         help="Simulation duration in ms (default: 1000)")
     parser.add_argument("--rate", type=float, default=10.0,
                         help="Poisson input rate for sensory neurons in Hz (default: 10)")
+    parser.add_argument("--amplitude", type=float, default=15.0,
+                        help="Poisson input voltage for sensory neurons in mV (default: 15)")
     parser.add_argument("--frozen", action="store_true",
                         help="Disable STDP weight updates (frozen weights)")
     parser.add_argument("--dt", type=float, default=1.0,
@@ -85,8 +142,10 @@ def main() -> None:
         s_mask = None
 
     pbar = tqdm(desc="Simulation time", total=args.duration, unit="ms")
-    spikes, voltages = simulate(model, stdp, s_mask, duration_ms=args.duration, rate_hz=args.rate, config=config,
-                                device=device, on_step=lambda: pbar.update(config.dt))
+    external_voltage, spikes, voltages = simulate(model, stdp, s_mask, duration_ms=args.duration, rate_hz=args.rate,
+                                                  amplitude_mv=args.amplitude, config=config, device=device, on_step=lambda: pbar.update(config.dt))
+
+    plot_simulation_(external_voltage, spikes, voltages, config)
 
     rates = _mean_firing_rate(spikes, config.dt)
     print(

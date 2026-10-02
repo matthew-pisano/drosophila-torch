@@ -202,12 +202,12 @@ class DrosophilaLIF(nn.Module):
         self.refractory_remaining.zero_()
         self.spike_buf.zero_()
 
-    def forward(self, timestep: int, current_in: torch.Tensor, ) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, timestep: int, external_voltage: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """Advance the simulation by one timestep.
 
         Args:
             timestep: Current timestep index (used to index spike buffer).
-            current_in: External input current per neuron.
+            external_voltage: External input voltage per neuron.
         Returns:
             spikes: A tensor representing neuron spikes, 1.0 where a neuron fired, else 0.0.
             voltage: Membrane voltage per neuron after this step."""
@@ -234,7 +234,7 @@ class DrosophilaLIF(nn.Module):
         not_refractory = (self.refractory_remaining == 0).float()
         alpha = cfg.dt / cfg.tau_mem
         self.mem_voltage = self.mem_voltage + not_refractory * alpha * (
-                -(self.mem_voltage - cfg.v_rest) + synaptic_currents + current_in
+                -(self.mem_voltage - cfg.v_rest) + synaptic_currents + external_voltage
         )
 
         # Spike detection (hard threshold)
@@ -257,17 +257,17 @@ class DrosophilaLIF(nn.Module):
 
         return spikes, self.mem_voltage
 
-    def run(self, current_in: torch.Tensor, stdp: STDPRule | None = None, on_step: Callable | None = None) -> tuple[torch.Tensor, torch.Tensor]:
+    def run(self, external_voltage: torch.Tensor, stdp: STDPRule | None = None, on_step: Callable | None = None) -> tuple[torch.Tensor, torch.Tensor]:
         """Run the simulation for total_timesteps.
 
         Args:
-            current_in: External input current per neuron.
+            external_voltage: External input voltage per neuron.
             stdp: If provided, weights are updated at each timestep using local spike timing. If None, weights are frozen.
             on_step: An optional callback which fires at the beginning of a timestep.
         Returns:
             A tuple of spike trains and membrane voltages at each time step."""
 
-        total_timesteps = current_in.shape[0]
+        total_timesteps = external_voltage.shape[0]
         self.reset_state()
         if stdp is not None:
             stdp.reset()
@@ -278,7 +278,7 @@ class DrosophilaLIF(nn.Module):
         for t in range(total_timesteps):
             on_step()  # Fire callback
 
-            spikes, voltage = self.forward(t, current_in[t])
+            spikes, voltage = self.forward(t, external_voltage[t])
             spike_record[t] = spikes
 
             voltage_record[t] = voltage
