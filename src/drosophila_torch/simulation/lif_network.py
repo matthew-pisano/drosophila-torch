@@ -229,7 +229,7 @@ class DrosophilaLIF(nn.Module):
         synaptic_currents.scatter_add_(0, self.edge_post, edge_current)
 
         # Membrane voltage update
-        # Euler discretization of: tau_mem * dV/dt = -(V - V_rest) + I
+        # Euler discretization of: tau_mem * dV/dt = -(V - V_rest) + V_external
         # Blocked for neurons currently in their refractory period.
         not_refractory = (self.refractory_remaining == 0).float()
         alpha = cfg.dt / cfg.tau_mem
@@ -276,7 +276,8 @@ class DrosophilaLIF(nn.Module):
         voltage_record = torch.zeros(total_timesteps, self.mem_voltage.shape[0], device=self.mem_voltage.device)
 
         for t in range(total_timesteps):
-            on_step()  # Fire callback
+            if on_step is not None:
+                on_step()  # Fire callback
 
             spikes, voltage = self.forward(t, external_voltage[t])
             spike_record[t] = spikes
