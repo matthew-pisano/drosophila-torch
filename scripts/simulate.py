@@ -30,7 +30,8 @@ def plot_simulation_(external_voltage: torch.Tensor, spikes: torch.Tensor, volta
     time_ms = torch.arange(T).float() * config.dt
 
     # Mean-reduce over neurons
-    mean_input_voltage = external_voltage.mean(dim=1).cpu()
+    fired_mask = (external_voltage > 0).any(dim=0)  # Only select neurons which have been externally stimulated
+    mean_input_voltage = external_voltage[:, fired_mask].mean(dim=1).cpu()
     mean_spike_rate = (spikes.mean(dim=1) / (config.dt * 1e-3)).cpu()
     mean_internal_voltage = voltages.mean(dim=1).cpu()
 
@@ -149,9 +150,11 @@ def main() -> None:
 
     rates = _mean_firing_rate(spikes, config.dt)
     print(
+        f"\nMean membrane voltage: {voltages.mean().item():.2f} mV  "
+        f"Max: {voltages.max().item():.2f} mV  "
         f"\nMean firing rate: {rates.mean().item():.2f} Hz  "
         f"Max: {rates.max().item():.2f} Hz  "
-        f"Active neurons: {(rates > 0).sum().item():,}"
+        f"\nActive neurons: {(rates > 0).sum().item():,}"
     )
 
     if args.out:
