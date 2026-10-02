@@ -220,21 +220,21 @@ class DrosophilaLIF(nn.Module):
         # The spikes from pre-synaptic neurons
         pre_spikes = self.spike_buf[buf_idx, self.edge_pre]
 
-        # Signed synaptic current per edge
+        # Signed synaptic voltage per edge
         # Sign comes from the pre-synaptic neuron's NT type
-        edge_current = pre_spikes * self.W * self.sign_vec[self.edge_pre]
+        edge_voltage = pre_spikes * self.W * self.sign_vec[self.edge_pre]
 
-        # Scatter-add edge currents to post-synaptic neurons
-        synaptic_currents = torch.zeros_like(self.mem_voltage)
-        synaptic_currents.scatter_add_(0, self.edge_post, edge_current)
+        # Scatter-add edge voltages to post-synaptic neurons
+        synaptic_voltages = torch.zeros_like(self.mem_voltage)
+        synaptic_voltages.scatter_add_(0, self.edge_post, edge_voltage)
 
         # Membrane voltage update
-        # Euler discretization of: tau_mem * dV/dt = -(V - V_rest) + V_external
+        # Euler discretization of: tau_mem * dV/dt = -(V - V_rest) + V_syn + V_ext
         # Blocked for neurons currently in their refractory period.
         not_refractory = (self.refractory_remaining == 0).float()
         alpha = cfg.dt / cfg.tau_mem
         self.mem_voltage = self.mem_voltage + not_refractory * alpha * (
-                -(self.mem_voltage - cfg.v_rest) + synaptic_currents + external_voltage
+                -(self.mem_voltage - cfg.v_rest) + synaptic_voltages + external_voltage
         )
 
         # Spike detection (hard threshold)
