@@ -17,26 +17,26 @@ from drosophila_torch.simulation.lif_network import DrosophilaLIF, LIFConfig, ST
 logger = logging.getLogger(__name__)
 
 
-def generate_pulses_(input_mask: torch.Tensor, total_timesteps: int, total_neurons: int, pulses_per_step: float, pulse_amplitude: float, device=None) -> torch.Tensor:
-    """Generate a poisson spike train for each input neuron.
+def generate_pulses_(input_mask: torch.Tensor, total_timesteps: int, total_neurons: int, pulse_amplitude: float,
+                     noise_std: float = 0.0, device=None) -> torch.Tensor:
+    """Generate a constant voltage stimulus for a targeted subset of neurons.
+
+    Delivers pulse_amplitude mV to each selected neuron at every timestep,
+    simulating sustained targeted excitatory input.
 
     Args:
-        input_mask: The neurons to spike.
-        total_timesteps: The number of timesteps to generate spikes for.
-        total_neurons: The total neurons in the network.
-        pulses_per_step: The pulses to generate at each time step.
-        pulse_amplitude: The voltage amplitude per Poisson event in mV
+        input_mask: Boolean mask over neurons to stimulate.
+        total_timesteps: Number of timesteps to stimulate for.
+        total_neurons: Total neurons in the network.
+        pulse_amplitude: Voltage drive in mV delivered per timestep.
+        noise_std: The standard deviation of gaussian noise to add to pulses.
         device: Target device.
     Returns:
         The external voltage supplied to the selected neurons at each timestep."""
 
-    n_selected = input_mask.sum().item()
-    # Generate Poisson input only for selected neurons, zero elsewhere
-    rate_per_step = torch.full((total_timesteps, n_selected), pulses_per_step, device=device)
-    spike_voltage = torch.poisson(rate_per_step).clamp(max=1.0) * pulse_amplitude
     external_voltage = torch.zeros(total_timesteps, total_neurons, device=device)
-    external_voltage[:, input_mask] = spike_voltage
-
+    drive = pulse_amplitude + torch.randn(total_timesteps, int(input_mask.sum().item()), device=device) * noise_std
+    external_voltage[:, input_mask] = drive
     return external_voltage
 
 
@@ -90,8 +90,7 @@ def simulate(
 
     logger.info(f"Selected neurons for stimulation: {n_selected:,} / {model.neuron_count():,}")
 
-    pulses_per_step = rate_hz * config.dt * 1e-3
-    external_voltage = generate_pulses_(input_mask, total_timesteps, model.neuron_count(), pulses_per_step, amplitude_mv, device)
+    external_voltage = generate_pulses_(input_mask, total_timesteps, model.neuron_count(), amplitude_mv, device=device)
 
     logger.info(
         f"Running {total_timesteps} timesteps ({duration_ms:.0f} ms) "
