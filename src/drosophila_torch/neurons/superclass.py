@@ -5,7 +5,7 @@ from enum import IntEnum
 
 class NeuronSuperclass(IntEnum):
     UNKNOWN = 17
-    """An unknown or unlabeled sensory type."""
+    """An unknown or unlabeled neuron type."""
 
     ENTERIC_NERVOUS_SYSTEM = 0
     """Gut-innervating neurons outside the central nervous system."""
@@ -69,6 +69,11 @@ class NeuronSuperclass(IntEnum):
 
     VNC_ENDOCRINE = 22
     """Neurons which cary hormonal signals from the ventral nerve cord to the corpora allata or corpora cardiaca."""
+
+    def sensory(self):
+        sensory_set = {NeuronSuperclass.SENSORY_ASCENDING, NeuronSuperclass.CB_SENSORY,
+                       NeuronSuperclass.OL_SENSORY, NeuronSuperclass.VNC_SENSORY}
+        return self in sensory_set
 
     def to_string(self):
         return {

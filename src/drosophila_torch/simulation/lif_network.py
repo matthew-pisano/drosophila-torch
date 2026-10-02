@@ -24,8 +24,11 @@ class LIFConfig:
 
     # Estimated hyperparameters based on biophysical measurements #
 
-    tau_mem: float = 20.0
+    tau_mem_default: float = 20.0
     """Membrane time constant in ms. Governs how long the neuron takes to leak potential back its resting voltage."""
+
+    tau_mem_sensory: float = 5.0
+    """Membrane time constant in ms. Governs how long the sensory neuron takes to leak potential back its resting voltage."""
 
     v_rest: float = -70.0
     """Resting membrane potential in mV."""
@@ -232,7 +235,7 @@ class DrosophilaLIF(nn.Module):
         # Euler discretization of: tau_mem * dV/dt = -(V - V_rest) + V_syn + V_ext
         # Blocked for neurons currently in their refractory period.
         not_refractory = (self.refractory_remaining == 0).float()
-        alpha = cfg.dt / cfg.tau_mem
+        alpha = cfg.dt / cfg.tau_mem_default
         self.mem_voltage = self.mem_voltage + not_refractory * alpha * (
                 -(self.mem_voltage - cfg.v_rest) + synaptic_voltages + external_voltage
         )

@@ -138,9 +138,10 @@ def main() -> None:
 
     if args.superclass:
         superclasses = [NeuronSuperclass.from_string(s) for s in args.superclass]
-        s_mask = superclass_mask(data["superclass_ids"], superclasses).to(device)
     else:
-        s_mask = None
+        superclasses = [sup for sup in NeuronSuperclass if sup.sensory()]
+
+    s_mask = superclass_mask(data["superclass_ids"], superclasses).to(device)
 
     pbar = tqdm(desc="Simulation time", total=args.duration, unit="ms")
     external_voltage, spikes, voltages = simulate(model, stdp, s_mask, duration_ms=args.duration, rate_hz=args.rate,
