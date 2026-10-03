@@ -17,8 +17,8 @@ from drosophila_torch.simulation.lif_network import DrosophilaLIF, LIFConfig, ST
 logger = logging.getLogger(__name__)
 
 
-def generate_pulses_(input_mask: torch.Tensor, total_timesteps: int, total_neurons: int, pulse_amplitude: float,
-                     noise_std: float = 0.0, device=None) -> torch.Tensor:
+def generate_pulses_(input_mask: torch.Tensor, total_timesteps: int, pulse_amplitude: float,
+                     noise_std: float = 1.0, device=None) -> torch.Tensor:
     """Generate a constant voltage stimulus for a targeted subset of neurons.
 
     Delivers pulse_amplitude mV to each selected neuron at every timestep,
@@ -27,14 +27,13 @@ def generate_pulses_(input_mask: torch.Tensor, total_timesteps: int, total_neuro
     Args:
         input_mask: Boolean mask over neurons to stimulate.
         total_timesteps: Number of timesteps to stimulate for.
-        total_neurons: Total neurons in the network.
         pulse_amplitude: Voltage drive in mV delivered per timestep.
         noise_std: The standard deviation of gaussian noise to add to pulses.
         device: Target device.
     Returns:
         The external voltage supplied to the selected neurons at each timestep."""
 
-    external_voltage = torch.zeros(total_timesteps, total_neurons, device=device)
+    external_voltage = torch.zeros(total_timesteps, len(input_mask), device=device)
     drive = pulse_amplitude + torch.randn(total_timesteps, int(input_mask.sum().item()), device=device) * noise_std
     external_voltage[:, input_mask] = drive
     return external_voltage
@@ -90,7 +89,7 @@ def simulate(
 
     logger.info(f"Selected neurons for stimulation: {n_selected:,} / {model.neuron_count():,}")
 
-    external_voltage = generate_pulses_(input_mask, total_timesteps, model.neuron_count(), amplitude_mv, device=device)
+    external_voltage = generate_pulses_(input_mask, total_timesteps, amplitude_mv, device=device)
 
     logger.info(
         f"Running {total_timesteps} timesteps ({duration_ms:.0f} ms) "
