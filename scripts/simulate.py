@@ -34,6 +34,7 @@ def plot_simulation_(external_voltage: torch.Tensor, spikes: torch.Tensor, volta
     mean_input_voltage = external_voltage[:, fired_mask].mean(dim=1).cpu()
     mean_spike_rate = (spikes.mean(dim=1) / (config.dt * 1e-3)).cpu()
     mean_internal_voltage = voltages.mean(dim=1).cpu()
+    max_internal_voltage = voltages.max(dim=1).values.cpu()
 
     fig = plt.figure(figsize=(12, 6))
     gs = gridspec.GridSpec(3, 1, hspace=0.6)
@@ -57,6 +58,7 @@ def plot_simulation_(external_voltage: torch.Tensor, spikes: torch.Tensor, volta
     # Membrane voltage
     ax_internal_volt = fig.add_subplot(gs[2])
     ax_internal_volt.plot(time_ms, mean_internal_voltage, linewidth=0.8, color="darkorange")
+    ax_internal_volt.plot(time_ms, max_internal_voltage, linestyle="--", linewidth=0.8, color="darkorange")
     ax_internal_volt.axhline(config.v_thresh, linestyle="--", linewidth=0.8,
                              color="red", label=f"Threshold ({config.v_thresh} mV)")
     ax_internal_volt.axhline(config.v_rest, linestyle="--", linewidth=0.8,
@@ -144,8 +146,9 @@ def main() -> None:
     s_mask = superclass_mask(data["superclass_ids"], superclasses).to(device)
 
     pbar = tqdm(desc="Simulation time", total=args.duration, unit="ms")
-    external_voltage, spikes, voltages = simulate(model, stdp, s_mask, duration_ms=args.duration, rate_hz=args.rate,
-                                                  amplitude_mv=args.amplitude, config=config, device=device, on_step=lambda: pbar.update(config.dt))
+    on_step = lambda: pbar.update(config.dt)
+    external_voltage, spikes, voltages = simulate(model, args.duration, args.rate, args.amplitude, stdp=stdp,
+                                                  input_mask=s_mask, config=config, device=device, on_step=on_step)
 
     plot_simulation_(external_voltage, spikes, voltages, config)
 
