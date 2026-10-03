@@ -148,14 +148,13 @@ class DrosophilaLIF(nn.Module):
     Synaptic weights are initialized from synapse counts and updated via STDP.
     Membrane biophysics (tau_mem, v_thresh, v_rest, v_reset) are uniform hyperparameters in LIFConfig.
 
-    Spike generation uses a hard Heaviside threshold and hard reset.
+    Spike generation is instant and immediately goes into the refractory period.
     No surrogate gradients are used; STDP is a local rule that does not require backprop.
 
     Args:
         axon_pre: A tensor of pre-synaptic, axon-originating neurons.
         axon_post: A tensor of post-synaptic, axon-terminating neurons.
         axon_delay: The delay in timesteps of information between neurons.
-        axon_weights: The strength of axons.
         sign_vec: A vector of signal signs for each neuron, excitatory or inhibitory.
         nt_vec: A vector of neuron types for each neuron.
         config: LIFConfig instance controlling biophysical and simulation  parameters. Defaults to LIFConfig()."""
@@ -164,7 +163,6 @@ class DrosophilaLIF(nn.Module):
                  axon_pre: torch.Tensor,
                  axon_post: torch.Tensor,
                  axon_delay: torch.Tensor,
-                 axon_weights: torch.Tensor,
                  sign_vec: torch.Tensor,
                  nt_vec: torch.Tensor,
                  config: LIFConfig = LIFConfig()) -> None:
@@ -178,10 +176,12 @@ class DrosophilaLIF(nn.Module):
         self.register_buffer("sign_vec", sign_vec)
         self.register_buffer("nt_vec", nt_vec)
 
-        # Initialized from synapse counts scaled by weight_scale.
+        # Weights are randomly initialized and scaled by weight_scale.
         # Kept non-negative; sign is applied at runtime via sign_vec[axon_pre].
         # Updated by STDPRule, not by gradient descent.
-        self.W = nn.Parameter(axon_weights.float().clamp(min=0.0) * config.weight_scale, requires_grad=False)
+        min_init, max_init = 0.5, 2.0
+        weight_range = (max_init - min_init) * torch.rand(axon_post.shape) + min_init
+        self.W = nn.Parameter(weight_range * config.weight_scale, requires_grad=False)
 
         max_delay = int(axon_delay.max().item())
         self.max_delay = max_delay
@@ -218,11 +218,11 @@ class DrosophilaLIF(nn.Module):
 
         # Signed synaptic voltage per axon
         # Sign comes from the pre-synaptic neuron's NT type
-        axon_voltage = pre_spikes * self.W * self.sign_vec[self.axon_pre]
+        per_synapse_voltages = pre_spikes * self.W * self.sign_vec[self.axon_pre]
 
         # Scatter-add axon voltages to post-synaptic neurons
         synaptic_voltages = torch.zeros_like(self.mem_voltage)
-        synaptic_voltages.scatter_add_(0, self.axon_post, axon_voltage)
+        synaptic_voltages.scatter_add_(0, self.axon_post, per_synapse_voltages)
 
         # Membrane voltage update
         # The leak naturally pulls v_reset back toward v_rest over time

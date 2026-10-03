@@ -124,7 +124,6 @@ def main() -> None:
         axon_pre=data["axon_pre_idx"].to(device),
         axon_post=data["axon_post_idx"].to(device),
         axon_delay=data["axon_delay_vec"].to(device),
-        axon_weights=data["axon_weights"].to(device),
         sign_vec=data["sign_vec"].to(device),
         nt_vec=data["nt_vec"].to(device),
         config=config,

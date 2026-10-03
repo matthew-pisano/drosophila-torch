@@ -104,16 +104,16 @@ def _build_neuron_index(edges: pd.DataFrame, annotations: pd.DataFrame) -> tuple
 
 
 def _build_axon_tensors(edges: pd.DataFrame, body_to_idx: pd.Series) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Convert the edge dataframe to axon index and weight tensors.
+    """Convert the edge dataframe to axon index and synapse count tensors.
 
     Returns:
-        axon_pre_idx, axon_post_idx, and axon_weights."""
+        axon_pre_idx, axon_post_idx, and axon_synapse_count."""
 
     chunk_size = 100_000
     num_edges = len(edges)
     axon_pre_idx = torch.empty(num_edges, dtype=torch.long)
     axon_post_idx = torch.empty(num_edges, dtype=torch.long)
-    axon_weights = torch.tensor(edges["weight"].values, dtype=torch.float32)
+    axon_synapse_count = torch.tensor(edges["weight"].values, dtype=torch.float32)
 
     with tqdm(total=num_edges, desc="Building edge tensors") as pbar:
         for start in range(0, num_edges, chunk_size):
@@ -131,7 +131,7 @@ def _build_axon_tensors(edges: pd.DataFrame, body_to_idx: pd.Series) -> tuple[to
             pbar.update(end - start)
 
     logger.info(f"Total edges: {num_edges:,}")
-    return axon_pre_idx, axon_post_idx, axon_weights
+    return axon_pre_idx, axon_post_idx, axon_synapse_count
 
 
 def _build_nt_tensors(neurotransmitters: pd.DataFrame, all_bodies: pd.Index) -> tuple[torch.Tensor, torch.Tensor]:
@@ -166,7 +166,7 @@ def _build_nt_tensors(neurotransmitters: pd.DataFrame, all_bodies: pd.Index) -> 
 def _build_adjacency_matrix(
         pre_idx: torch.Tensor,
         post_idx: torch.Tensor,
-        axon_weights: torch.Tensor,
+        axon_synapse_count: torch.Tensor,
         num_neurons: int,
 ) -> torch.Tensor:
     """Build sparse CSR adjacency matrix.
@@ -179,7 +179,7 @@ def _build_adjacency_matrix(
     axon_indices = torch.stack([pre_idx, post_idx])
 
     adj = (
-        torch.sparse_coo_tensor(axon_indices, axon_weights, size=(num_neurons, num_neurons))
+        torch.sparse_coo_tensor(axon_indices, axon_synapse_count, size=(num_neurons, num_neurons))
         .to_sparse_csr()
     )
     return adj
@@ -293,14 +293,14 @@ def build(paths: dict[str, Path], superclasses: list[str] | None = None, types: 
     all_bodies, body_to_idx = _build_neuron_index(edges, annotations)
 
     logger.info("Building axon tensors ...")
-    axon_pre_idx, axon_post_idx, axon_weights = _build_axon_tensors(edges, body_to_idx)
+    axon_pre_idx, axon_post_idx, axon_synapse_count = _build_axon_tensors(edges, body_to_idx)
 
     logger.info("Computing neurotransmitter signs ...")
     nt_vec, sign_vec = _build_nt_tensors(neurotransmitters, all_bodies)
 
     logger.info("Building adjacency matrices ...")
     adj = _build_adjacency_matrix(
-        axon_pre_idx, axon_post_idx, axon_weights, num_neurons=len(all_bodies)
+        axon_pre_idx, axon_post_idx, axon_synapse_count, num_neurons=len(all_bodies)
     )
 
     logger.info("Building soma coordinates ...")
@@ -317,7 +317,7 @@ def build(paths: dict[str, Path], superclasses: list[str] | None = None, types: 
         "adj": adj,  # Sparse adjacency matrix between neurons
         "axon_pre_idx": axon_pre_idx,  # The starting neurons of each axon
         "axon_post_idx": axon_post_idx,  # The ending neurons of each axon
-        "axon_weights": axon_weights,  # The synapse counts for each axon
+        "axon_synapse_count": axon_synapse_count,  # The synapse counts for each axon
         "axon_delay_vec": axon_delay_vec,  # The delay of each axon in ms
         "nt_vec": nt_vec,  # A vector of neurotransmitter values, indexed for each neuron
         "sign_vec": sign_vec,  # A vector of neurotransmitter signs
