@@ -30,7 +30,7 @@ def _load_feathers(paths: dict[str, Path]) -> tuple[pd.DataFrame, pd.DataFrame, 
     return edges, annotations, neurotransmitters
 
 
-def _filter_neurons(
+def _filter_data(
         edges: pd.DataFrame,
         annotations: pd.DataFrame,
         superclasses: list[str] | None,
@@ -287,7 +287,7 @@ def build(paths: dict[str, Path], superclasses: list[str] | None = None, types: 
     logger.info("Loading feather files ...")
     edges, annotations, neurotransmitters = _load_feathers(paths)
 
-    edges, annotations = _filter_neurons(edges, annotations, superclasses=superclasses, types=types)
+    edges, annotations = _filter_data(edges, annotations, superclasses=superclasses, types=types)
 
     logger.info("Building neuron index ...")
     all_bodies, body_to_idx = _build_neuron_index(edges, annotations)
