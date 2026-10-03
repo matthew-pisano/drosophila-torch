@@ -45,7 +45,7 @@ class LIFConfig:
     """Simulation timestep in ms."""
 
     min_delay: int = 1
-    """Minimum synaptic delay in timesteps. Applied to edges where soma coordinates are missing or where the 
+    """Minimum synaptic delay in timesteps. Applied to axons where soma coordinates are missing or where the 
     distance-derived delay rounds to zero."""
 
     weight_scale: float = 1.0
@@ -101,13 +101,13 @@ class STDPRule:
         self.trace.zero_()
 
     @torch.no_grad()
-    def step(self, spikes: torch.Tensor, edge_pre: torch.Tensor, edge_post: torch.Tensor, nt_vec: torch.Tensor, W: nn.Parameter) -> None:
+    def step(self, spikes: torch.Tensor, axon_pre: torch.Tensor, axon_post: torch.Tensor, nt_vec: torch.Tensor, W: nn.Parameter) -> None:
         """Update trace and apply weight changes for one timestep.
 
         Args:
             spikes: Spike vector for network neurons.
-            edge_pre: Pre-synaptic neuron index for each edge.
-            edge_post: Post-synaptic neuron index for each edge.
+            axon_pre: Pre-synaptic neuron index for each axon.
+            axon_post: Post-synaptic neuron index for each axon.
             nt_vec: The neurotransmitter vector for each neuron.
             W: Synaptic weight parameter to update in-place."""
 
@@ -120,19 +120,19 @@ class STDPRule:
         # Measures how active dopaminergic are
         da_signal = spikes[da_mask].mean()
 
-        # Only ionotropic edges undergo classic STDP
-        edge_nt = nt_vec[edge_pre]
+        # Only ionotropic axons undergo classic STDP
+        axon_nt = nt_vec[axon_pre]
         ionotropic = (
-                (edge_nt == NTType.ACETYLCHOLINE) |
-                (edge_nt == NTType.GABA) |
-                (edge_nt == NTType.GLUTAMATE)
+                (axon_nt == NTType.ACETYLCHOLINE) |
+                (axon_nt == NTType.GABA) |
+                (axon_nt == NTType.GLUTAMATE)
         )
 
-        # Per-edge: LTP when post fires (pre trace captures recent pre activity)
-        dW_plus = self.a_plus * self.trace[edge_post] * self.trace[edge_pre]
+        # Per-axon: LTP when post fires (pre trace captures recent pre activity)
+        dW_plus = self.a_plus * self.trace[axon_post] * self.trace[axon_pre]
 
-        # Per-edge: LTD when pre fires (post trace captures recent post activity)
-        dW_minus = self.a_minus * self.trace[edge_pre] * self.trace[edge_post]
+        # Per-axon: LTD when pre fires (post trace captures recent post activity)
+        dW_minus = self.a_minus * self.trace[axon_pre] * self.trace[axon_post]
 
         # Dopamine gates the magnitude of plasticity
         dW = (dW_plus - dW_minus) * ionotropic.float() * (1.0 + da_signal)
@@ -152,19 +152,19 @@ class DrosophilaLIF(nn.Module):
     No surrogate gradients are used; STDP is a local rule that does not require backprop.
 
     Args:
-        edge_pre: A tensor of pre-synaptic, edge-originating neurons.
-        edge_post: A tensor of post-synaptic, edge-terminating neurons.
-        edge_delay: The delay in timesteps of information between neurons.
-        edge_weights: The strength of edges.
+        axon_pre: A tensor of pre-synaptic, axon-originating neurons.
+        axon_post: A tensor of post-synaptic, axon-terminating neurons.
+        axon_delay: The delay in timesteps of information between neurons.
+        axon_weights: The strength of axons.
         sign_vec: A vector of signal signs for each neuron, excitatory or inhibitory.
         nt_vec: A vector of neuron types for each neuron.
         config: LIFConfig instance controlling biophysical and simulation  parameters. Defaults to LIFConfig()."""
 
     def __init__(self,
-                 edge_pre: torch.Tensor,
-                 edge_post: torch.Tensor,
-                 edge_delay: torch.Tensor,
-                 edge_weights: torch.Tensor,
+                 axon_pre: torch.Tensor,
+                 axon_post: torch.Tensor,
+                 axon_delay: torch.Tensor,
+                 axon_weights: torch.Tensor,
                  sign_vec: torch.Tensor,
                  nt_vec: torch.Tensor,
                  config: LIFConfig = LIFConfig()) -> None:
@@ -172,18 +172,18 @@ class DrosophilaLIF(nn.Module):
         self.config = config
         n_neurons = len(nt_vec)
 
-        self.register_buffer("edge_pre", edge_pre)
-        self.register_buffer("edge_post", edge_post)
-        self.register_buffer("edge_delay", edge_delay)
+        self.register_buffer("axon_pre", axon_pre)
+        self.register_buffer("axon_post", axon_post)
+        self.register_buffer("axon_delay", axon_delay)
         self.register_buffer("sign_vec", sign_vec)
         self.register_buffer("nt_vec", nt_vec)
 
         # Initialized from synapse counts scaled by weight_scale.
-        # Kept non-negative; sign is applied at runtime via sign_vec[edge_pre].
+        # Kept non-negative; sign is applied at runtime via sign_vec[axon_pre].
         # Updated by STDPRule, not by gradient descent.
-        self.W = nn.Parameter(edge_weights.float().clamp(min=0.0) * config.weight_scale, requires_grad=False)
+        self.W = nn.Parameter(axon_weights.float().clamp(min=0.0) * config.weight_scale, requires_grad=False)
 
-        max_delay = int(edge_delay.max().item())
+        max_delay = int(axon_delay.max().item())
         self.max_delay = max_delay
 
         # The cross membrane voltage of each neuron.
@@ -210,19 +210,19 @@ class DrosophilaLIF(nn.Module):
 
         cfg = self.config
 
-        # Retrieve delayed pre-synaptic spikes for each edge
-        # buf_idx wraps around the circular buffer for each edge's delay
-        buf_idx = (timestep - self.edge_delay) % (self.max_delay + 1)
+        # Retrieve delayed pre-synaptic spikes for each axon
+        # buf_idx wraps around the circular buffer for each axon's delay
+        buf_idx = (timestep - self.axon_delay) % (self.max_delay + 1)
         # The spikes from pre-synaptic neurons
-        pre_spikes = self.spike_buf[buf_idx, self.edge_pre]
+        pre_spikes = self.spike_buf[buf_idx, self.axon_pre]
 
-        # Signed synaptic voltage per edge
+        # Signed synaptic voltage per axon
         # Sign comes from the pre-synaptic neuron's NT type
-        edge_voltage = pre_spikes * self.W * self.sign_vec[self.edge_pre]
+        axon_voltage = pre_spikes * self.W * self.sign_vec[self.axon_pre]
 
-        # Scatter-add edge voltages to post-synaptic neurons
+        # Scatter-add axon voltages to post-synaptic neurons
         synaptic_voltages = torch.zeros_like(self.mem_voltage)
-        synaptic_voltages.scatter_add_(0, self.edge_post, edge_voltage)
+        synaptic_voltages.scatter_add_(0, self.axon_post, axon_voltage)
 
         # Membrane voltage update
         # The leak naturally pulls v_reset back toward v_rest over time
@@ -271,8 +271,8 @@ class DrosophilaLIF(nn.Module):
             if stdp is not None:
                 stdp.step(
                     spikes=spikes,
-                    edge_pre=self.edge_pre,
-                    edge_post=self.edge_post,
+                    axon_pre=self.axon_pre,
+                    axon_post=self.axon_post,
                     nt_vec=self.nt_vec,
                     W=self.W,
                 )
@@ -284,7 +284,7 @@ class DrosophilaLIF(nn.Module):
 
         return len(self.nt_vec)
 
-    def edge_count(self):
-        """The number of edges in the network."""
+    def synapse_count(self):
+        """The number of synapses in the network."""
 
-        return len(self.edge_pre)
+        return len(self.axon_pre)

@@ -121,16 +121,16 @@ def main() -> None:
     config = LIFConfig(dt=args.dt)
 
     model = DrosophilaLIF(
-        edge_pre=data["edge_pre_idx"].to(device),
-        edge_post=data["edge_post_idx"].to(device),
-        edge_delay=data["edge_delay_vec"].to(device),
-        edge_weights=data["edge_weights"].to(device),
+        axon_pre=data["axon_pre_idx"].to(device),
+        axon_post=data["axon_post_idx"].to(device),
+        axon_delay=data["axon_delay_vec"].to(device),
+        axon_weights=data["axon_weights"].to(device),
         sign_vec=data["sign_vec"].to(device),
         nt_vec=data["nt_vec"].to(device),
         config=config,
     ).to(device)
 
-    print(f"Neurons: {model.neuron_count():,}  Edges: {model.edge_count():,}")
+    print(f"Neurons: {model.neuron_count():,}  Synapses: {model.synapse_count():,}")
 
     stdp = STDPRule(
         n_neurons=model.mem_voltage.shape[0],

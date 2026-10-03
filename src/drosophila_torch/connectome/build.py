@@ -103,35 +103,35 @@ def _build_neuron_index(edges: pd.DataFrame, annotations: pd.DataFrame) -> tuple
     return all_bodies, body_to_idx
 
 
-def _build_edge_tensors(edges: pd.DataFrame, body_to_idx: pd.Series) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Convert the edge dataframe to index and weight tensors.
+def _build_axon_tensors(edges: pd.DataFrame, body_to_idx: pd.Series) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Convert the edge dataframe to axon index and weight tensors.
 
     Returns:
-        edge_pre_idx, edge_post_idx, and edge_weights."""
+        axon_pre_idx, axon_post_idx, and axon_weights."""
 
     chunk_size = 100_000
     num_edges = len(edges)
-    edge_pre_idx = torch.empty(num_edges, dtype=torch.long)
-    edge_post_idx = torch.empty(num_edges, dtype=torch.long)
-    edge_weights = torch.tensor(edges["weight"].values, dtype=torch.float32)
+    axon_pre_idx = torch.empty(num_edges, dtype=torch.long)
+    axon_post_idx = torch.empty(num_edges, dtype=torch.long)
+    axon_weights = torch.tensor(edges["weight"].values, dtype=torch.float32)
 
     with tqdm(total=num_edges, desc="Building edge tensors") as pbar:
         for start in range(0, num_edges, chunk_size):
             end = min(start + chunk_size, num_edges)
             chunk = slice(start, end)
 
-            edge_pre_idx[chunk] = torch.tensor(
+            axon_pre_idx[chunk] = torch.tensor(
                 body_to_idx.reindex(edges["body_pre"].values[chunk]).values,
                 dtype=torch.long
             )
-            edge_post_idx[chunk] = torch.tensor(
+            axon_post_idx[chunk] = torch.tensor(
                 body_to_idx.reindex(edges["body_post"].values[chunk]).values,
                 dtype=torch.long
             )
             pbar.update(end - start)
 
     logger.info(f"Total edges: {num_edges:,}")
-    return edge_pre_idx, edge_post_idx, edge_weights
+    return axon_pre_idx, axon_post_idx, axon_weights
 
 
 def _build_nt_tensors(neurotransmitters: pd.DataFrame, all_bodies: pd.Index) -> tuple[torch.Tensor, torch.Tensor]:
@@ -166,7 +166,7 @@ def _build_nt_tensors(neurotransmitters: pd.DataFrame, all_bodies: pd.Index) -> 
 def _build_adjacency_matrix(
         pre_idx: torch.Tensor,
         post_idx: torch.Tensor,
-        edge_weights: torch.Tensor,
+        axon_weights: torch.Tensor,
         num_neurons: int,
 ) -> torch.Tensor:
     """Build sparse CSR adjacency matrix.
@@ -176,10 +176,10 @@ def _build_adjacency_matrix(
     Returns:
         The sparse CSR adjacency matrix for neurons."""
 
-    edge_indices = torch.stack([pre_idx, post_idx])
+    axon_indices = torch.stack([pre_idx, post_idx])
 
     adj = (
-        torch.sparse_coo_tensor(edge_indices, edge_weights, size=(num_neurons, num_neurons))
+        torch.sparse_coo_tensor(axon_indices, axon_weights, size=(num_neurons, num_neurons))
         .to_sparse_csr()
     )
     return adj
@@ -203,24 +203,24 @@ def _build_soma_coordinates(annotations: pd.DataFrame, all_bodies: pd.Index) -> 
     return torch.tensor(coords, dtype=torch.float32)
 
 
-def _build_edge_delay_vector(
-        edge_pre_idx: torch.Tensor,
-        edge_post_idx: torch.Tensor,
+def _build_axon_delay_vector(
+        axon_pre_idx: torch.Tensor,
+        axon_post_idx: torch.Tensor,
         soma_xyz: torch.Tensor,
         soma_xyz_valid: torch.Tensor,
         delay_per_voxel: float = 500_000 / 8,  # 500,000 nm per ms speed / 8 nm per voxel
         min_delay: int = 1,
 ) -> torch.Tensor:
-    """Estimate per-edge synaptic delay from soma distance."""
+    """Estimate per-axon synaptic delay from soma distance."""
 
-    edge_pre_xyz = soma_xyz[edge_pre_idx]
-    edge_post_xyz = soma_xyz[edge_post_idx]
+    axon_pre_xyz = soma_xyz[axon_pre_idx]
+    axon_post_xyz = soma_xyz[axon_post_idx]
 
     # Euclidean distance in 8nm voxels
-    dist = torch.norm(edge_post_xyz - edge_pre_xyz, dim=-1)
+    dist = torch.norm(axon_post_xyz - axon_pre_xyz, dim=-1)
 
-    # Mask edges where either endpoint has no soma location
-    valid = soma_xyz_valid[edge_pre_idx] & soma_xyz_valid[edge_post_idx]
+    # Mask axons where either endpoint has no soma location
+    valid = soma_xyz_valid[axon_pre_idx] & soma_xyz_valid[axon_post_idx]
 
     delay = (dist / delay_per_voxel).round().long().clamp(min=min_delay)
     delay = torch.where(valid, delay, torch.tensor(min_delay))  # NaN coordinate neurons experience min_delay
@@ -281,7 +281,7 @@ def _build_annotation_tensors(annotations: pd.DataFrame, all_bodies: pd.Index) -
 def build(paths: dict[str, Path], superclasses: list[str] | None = None, types: list[str] | None = None) -> dict:
     """Orchestrate the full feather to connectome tensor conversion pipeline.
 
-    Loads the three source files, builds the neuron index, edge tensors, sign vector, adjacency matrices, and annotation
+    Loads the three source files, builds the neuron index, axon tensors, sign vector, adjacency matrices, and annotation
     tensors, then packs everything into a single dict for torch.save()."""
 
     logger.info("Loading feather files ...")
@@ -292,36 +292,36 @@ def build(paths: dict[str, Path], superclasses: list[str] | None = None, types: 
     logger.info("Building neuron index ...")
     all_bodies, body_to_idx = _build_neuron_index(edges, annotations)
 
-    logger.info("Building edge tensors ...")
-    edge_pre_idx, edge_post_idx, edge_weights = _build_edge_tensors(edges, body_to_idx)
+    logger.info("Building axon tensors ...")
+    axon_pre_idx, axon_post_idx, axon_weights = _build_axon_tensors(edges, body_to_idx)
 
     logger.info("Computing neurotransmitter signs ...")
     nt_vec, sign_vec = _build_nt_tensors(neurotransmitters, all_bodies)
 
     logger.info("Building adjacency matrices ...")
     adj = _build_adjacency_matrix(
-        edge_pre_idx, edge_post_idx, edge_weights, num_neurons=len(all_bodies)
+        axon_pre_idx, axon_post_idx, axon_weights, num_neurons=len(all_bodies)
     )
 
     logger.info("Building soma coordinates ...")
     soma_xyz = _build_soma_coordinates(annotations, all_bodies)
     soma_xyz_valid = ~torch.isnan(soma_xyz).any(dim=-1)
 
-    logger.info("Building edge delay vector ...")
-    edge_delay_vec = _build_edge_delay_vector(edge_pre_idx, edge_post_idx, soma_xyz, soma_xyz_valid)
+    logger.info("Building axon delay vector ...")
+    axon_delay_vec = _build_axon_delay_vector(axon_pre_idx, axon_post_idx, soma_xyz, soma_xyz_valid)
 
     logger.info("Encoding annotations ...")
     annotation_tensors = _build_annotation_tensors(annotations, all_bodies)
 
     return {
         "adj": adj,  # Sparse adjacency matrix between neurons
-        "edge_pre_idx": edge_pre_idx,  # The starting neurons of each edge
-        "edge_post_idx": edge_post_idx,  # The ending neurons of each edge
-        "edge_weights": edge_weights,  # The synapse counts for each edge
-        "edge_delay_vec": edge_delay_vec,  # The delay of each edge in ms
+        "axon_pre_idx": axon_pre_idx,  # The starting neurons of each axon
+        "axon_post_idx": axon_post_idx,  # The ending neurons of each axon
+        "axon_weights": axon_weights,  # The synapse counts for each axon
+        "axon_delay_vec": axon_delay_vec,  # The delay of each axon in ms
         "nt_vec": nt_vec,  # A vector of neurotransmitter values, indexed for each neuron
         "sign_vec": sign_vec,  # A vector of neurotransmitter signs
-        "body_ids": torch.tensor(all_bodies.values, dtype=torch.int64),  # The body ids of each neuron
+        "soma_ids": torch.tensor(all_bodies.values, dtype=torch.int64),  # The soma ids of each neuron
         "soma_xyz": soma_xyz,  # A vector of 3D neuron coordinates
         "soma_xyz_valid": soma_xyz_valid,  # A NaN mask for whether a neuron has valid coordinates
         **annotation_tensors,
