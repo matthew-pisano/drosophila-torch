@@ -17,7 +17,7 @@ from drosophila_torch.simulation.lif_network import DrosophilaLIF, LIFConfig, ST
 logger = logging.getLogger(__name__)
 
 
-def generate_pulses_(input_mask: torch.Tensor, total_timesteps: int, pulse_amplitude: float,
+def generate_pulses_(input_mask: torch.Tensor, pulse_vector: torch.Tensor,
                      noise_std: float = 1.0, device=None) -> torch.Tensor:
     """Generate a constant voltage stimulus for a targeted subset of neurons.
 
@@ -26,17 +26,14 @@ def generate_pulses_(input_mask: torch.Tensor, total_timesteps: int, pulse_ampli
 
     Args:
         input_mask: Boolean mask over neurons to stimulate.
-        total_timesteps: Number of timesteps to stimulate for.
-        pulse_amplitude: Voltage drive in mV delivered per timestep.
+        pulse_vector: A vector spanning the time span of the simulation with elements representing pulse amplitude.
         noise_std: The standard deviation of gaussian noise to add to pulses.
         device: Target device.
     Returns:
         The external voltage supplied to the selected neurons at each timestep."""
 
-    external_voltage = torch.zeros(total_timesteps, len(input_mask), device=device)
-    drive = pulse_amplitude + torch.randn(total_timesteps, int(input_mask.sum().item()), device=device) * noise_std
-    external_voltage[:, input_mask] = drive
-    return external_voltage
+    pulse_amplitudes = pulse_vector * torch.randn(len(pulse_vector), device=device).abs() * noise_std
+    return torch.outer(pulse_amplitudes, input_mask.float())
 
 
 def superclass_mask(superclass_ids: torch.Tensor, superclasses: list[NeuronSuperclass]) -> torch.Tensor:
@@ -61,7 +58,7 @@ def simulate(
         input_mask: torch.Tensor | None = None,
         duration_ms: float = 1000.0,
         rate_hz: float = 10.0,
-        amplitude_mv: float = 15.0,
+        amplitude_mv: float = 5.0,
         config: LIFConfig = LIFConfig(),
         device: torch.device | None = None,
         on_step: Callable | None = None
@@ -89,7 +86,10 @@ def simulate(
 
     logger.info(f"Selected neurons for stimulation: {n_selected:,} / {model.neuron_count():,}")
 
-    external_voltage = generate_pulses_(input_mask, total_timesteps, amplitude_mv, device=device)
+    pulse_vector = torch.zeros(total_timesteps, device=device)
+    pulse_vector[:int(total_timesteps / 2)] = amplitude_mv
+
+    external_voltage = generate_pulses_(input_mask, pulse_vector, device=device)
 
     logger.info(
         f"Running {total_timesteps} timesteps ({duration_ms:.0f} ms) "
