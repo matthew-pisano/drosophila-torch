@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 def generate_pulses_(input_mask: torch.Tensor, pulse_vector: torch.Tensor,
-                     noise_std: float = 1.0, device=None) -> torch.Tensor:
+                     noise_std: float = 0.0, device=None) -> torch.Tensor:
     """Generate a constant voltage stimulus for a targeted subset of neurons.
 
     Delivers pulse_amplitude mV to each selected neuron at every timestep,
@@ -32,8 +32,11 @@ def generate_pulses_(input_mask: torch.Tensor, pulse_vector: torch.Tensor,
     Returns:
         The external voltage supplied to the selected neurons at each timestep."""
 
-    pulse_amplitudes = pulse_vector * torch.randn(len(pulse_vector), device=device).abs() * noise_std
-    return torch.outer(pulse_amplitudes, input_mask.float())
+    pulse_mask = pulse_vector > 0
+    jitter = torch.randn(len(pulse_vector), device=device) * noise_std
+    jitter[~pulse_mask] = 0
+    bounded_pulse_vector = (pulse_vector + jitter).abs()
+    return torch.outer(bounded_pulse_vector, input_mask.float())
 
 
 def superclass_mask(superclass_ids: torch.Tensor, superclasses: list[NeuronSuperclass]) -> torch.Tensor:
@@ -54,11 +57,11 @@ def superclass_mask(superclass_ids: torch.Tensor, superclasses: list[NeuronSuper
 
 def simulate(
         model: DrosophilaLIF,
+        duration_ms: float,
+        rate_hz: float,
+        amplitude_mv: float,
         stdp: STDPRule | None = None,
         input_mask: torch.Tensor | None = None,
-        duration_ms: float = 1000.0,
-        rate_hz: float = 10.0,
-        amplitude_mv: float = 5.0,
         config: LIFConfig = LIFConfig(),
         device: torch.device | None = None,
         on_step: Callable | None = None
@@ -67,11 +70,11 @@ def simulate(
 
     Args:
         model: The LIF neural network to model.
-        stdp: The updating rule for the neurons in the network.
-        input_mask: A mask for which neurons to omit from artificial stimulation.
         duration_ms: Simulation duration in ms.
         rate_hz: Poisson input rate for sensory neurons in Hz.
         amplitude_mv: Voltage amplitude per Poisson event in mV.
+        stdp: The updating rule for the neurons in the network.
+        input_mask: A mask for which neurons to omit from artificial stimulation.
         config: LIF configuration.
         device: Target device.
         on_step: An optional callback which fires at the beginning of a simulation timestep.
@@ -87,7 +90,7 @@ def simulate(
     logger.info(f"Selected neurons for stimulation: {n_selected:,} / {model.neuron_count():,}")
 
     pulse_vector = torch.zeros(total_timesteps, device=device)
-    pulse_vector[:int(total_timesteps / 2)] = amplitude_mv
+    pulse_vector[:int(total_timesteps * 0.6)] = amplitude_mv
 
     external_voltage = generate_pulses_(input_mask, pulse_vector, device=device)
 
