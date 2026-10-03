@@ -48,9 +48,6 @@ class LIFConfig:
     """Minimum synaptic delay in timesteps. Applied to edges where soma coordinates are missing or where the 
     distance-derived delay rounds to zero."""
 
-    refractory_steps: int = 2
-    """Absolute refractory period in timesteps. During this window the neuron cannot spike regardless of input."""
-
     weight_scale: float = 1.0
     """Global scale factor applied to synapse counts. Synapse count is a structural proxy for connection strength 
     instead of a conductance measurement."""
@@ -192,9 +189,6 @@ class DrosophilaLIF(nn.Module):
         # The cross membrane voltage of each neuron.
         self.register_buffer("mem_voltage", torch.full((n_neurons,), config.v_rest))
 
-        # The remaining refractory steps per neuron.
-        self.register_buffer("refractory_remaining", torch.zeros(n_neurons, dtype=torch.long))
-
         # A circular buffer of past spike trains.
         self.register_buffer("spike_buf", torch.zeros(max_delay + 1, n_neurons))
 
@@ -202,7 +196,6 @@ class DrosophilaLIF(nn.Module):
         """Reset all dynamic state to initial conditions. Call at the start of each trial or epoch."""
 
         self.mem_voltage.fill_(self.config.v_rest)
-        self.refractory_remaining.zero_()
         self.spike_buf.zero_()
 
     def forward(self, timestep: int, external_voltage: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -232,27 +225,16 @@ class DrosophilaLIF(nn.Module):
         synaptic_voltages.scatter_add_(0, self.edge_post, edge_voltage)
 
         # Membrane voltage update
-        # Euler discretization of: tau_mem * dV/dt = -(V - V_rest) + V_syn + V_ext
-        # Blocked for neurons currently in their refractory period.
-        not_refractory = (self.refractory_remaining == 0).float()
-        membrane_leak = cfg.dt / cfg.tau_membrane * (self.mem_voltage - cfg.v_rest)
-        synaptic_drive = cfg.dt / cfg.tau_synapse * (synaptic_voltages + external_voltage)
-        self.mem_voltage += not_refractory * (-membrane_leak + synaptic_drive)
+        # The leak naturally pulls v_reset back toward v_rest over time
+        membrane_leak = (cfg.dt / cfg.tau_membrane) * (self.mem_voltage - cfg.v_rest)
+        synaptic_drive = (cfg.dt / cfg.tau_synapse) * (synaptic_voltages + external_voltage)
+        self.mem_voltage += -membrane_leak + synaptic_drive
 
-        # Spike detection (hard threshold)
+        # Spike detection
         spikes = (self.mem_voltage >= cfg.v_thresh).float()
 
-        # Hard reset and refractory counter
-        self.mem_voltage = torch.where(
-            spikes.bool(),
-            torch.full_like(self.mem_voltage, cfg.v_reset),
-            self.mem_voltage,
-        )
-        self.refractory_remaining = torch.where(
-            spikes.bool(),
-            torch.full_like(self.refractory_remaining, cfg.refractory_steps),
-            (self.refractory_remaining - 1).clamp(min=0),
-        )
+        # Reset to after-hyperpolarization voltage, refractory emerges naturally from the leak pulling v_reset back toward v_rest
+        self.mem_voltage = torch.where(spikes.bool(), torch.full_like(self.mem_voltage, cfg.v_reset), self.mem_voltage)
 
         # Write spikes into circular buffer
         self.spike_buf[timestep % (self.max_delay + 1)] = spikes
