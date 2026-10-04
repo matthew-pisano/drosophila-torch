@@ -11,52 +11,75 @@ from tqdm import tqdm
 import drosophila_torch
 from drosophila_torch.neurons.superclass import NeuronSuperclass
 from drosophila_torch.simulation.lif_network import LIFConfig, DrosophilaLIF, STDPRule
-from drosophila_torch.simulation.simulation import superclass_mask, simulate
+from drosophila_torch.simulation.simulation import simulate, superclass_mask
 
 
 drosophila_torch.enable_logging()
 
 
-def plot_simulation_(external_voltage: torch.Tensor, spikes: torch.Tensor, voltages: torch.Tensor, config: LIFConfig) -> None:
+def plot_simulation_(external_voltage: torch.Tensor, spikes: torch.Tensor, voltages: torch.Tensor,
+                     superclass_ids: torch.Tensor, config: LIFConfig) -> None:
     """Plot mean firing rate and mean membrane voltage over time.
 
     Args:
         external_voltage: External input voltage to selected neurons.
         spikes: Spike tensor over time.
         voltages: Voltage tensor over time.
+        superclass_ids: The superclass ids of simulation neurons.
         config: The LIF config used for simulation."""
 
     T = spikes.shape[0]
     time_ms = torch.arange(T).float() * config.dt
 
-    # Mean-reduce over neurons
-    fired_mask = (external_voltage > 0).any(dim=0)  # Only select neurons which have been externally stimulated
-    mean_input_voltage = external_voltage[:, fired_mask].mean(dim=1).cpu()
+    # General activity metrics
+    external_mask = (external_voltage > 0).any(dim=0)  # Only select neurons which have been externally stimulated
+    mean_input_voltage = external_voltage[:, external_mask].mean(dim=1).cpu()
     mean_spike_rate = (spikes.mean(dim=1) / (config.dt * 1e-3)).cpu()
     mean_internal_voltage = voltages.mean(dim=1).cpu()
     max_internal_voltage = voltages.max(dim=1).values.cpu()
+    active_neuron_count = (spikes > 0).sum(dim=1).cpu()
 
-    fig = plt.figure(figsize=(12, 6))
-    gs = gridspec.GridSpec(3, 1, hspace=0.6)
+    # Per-region activity metrics
+    cb_mask = superclass_mask(superclass_ids, NeuronSuperclass.central_brain())
+    mean_cb_spike_rate = spikes[:, cb_mask].mean(dim=1).cpu()
+    ol_mask = superclass_mask(superclass_ids, NeuronSuperclass.optic_lobe())
+    mean_ol_spike_rate = spikes[:, ol_mask].mean(dim=1).cpu()
+    vnc_mask = superclass_mask(superclass_ids, NeuronSuperclass.ventral_nerve_cord())
+    mean_vnc_spike_rate = spikes[:, vnc_mask].mean(dim=1).cpu()
+    sensory_mask = superclass_mask(superclass_ids, NeuronSuperclass.sensory())
+    mean_sensory_spike_rate = spikes[:, sensory_mask].mean(dim=1).cpu()
+    motor_mask = superclass_mask(superclass_ids, NeuronSuperclass.motor())
+    mean_motor_spike_rate = spikes[:, motor_mask].mean(dim=1).cpu()
+
+    fig = plt.figure(figsize=(20, 16))
+    gs = gridspec.GridSpec(5, 5, hspace=0.6, wspace=0.3)
 
     # Input voltage
-    ax_input_volt = fig.add_subplot(gs[0])
+    ax_input_volt = fig.add_subplot(gs[0, :])
     ax_input_volt.plot(time_ms, mean_input_voltage, linewidth=0.8, color="green")
     ax_input_volt.set_ylabel("Mean input voltage (mV)")
     ax_input_volt.set_xlabel("Time (ms)")
     ax_input_volt.set_title("Input neuron mean external voltage")
     ax_input_volt.set_xlim(0, time_ms[-1].item())
 
-    # Firing rate
-    ax_rate = fig.add_subplot(gs[1])
+    # Spike rate
+    ax_rate = fig.add_subplot(gs[1, :])
     ax_rate.plot(time_ms, mean_spike_rate, linewidth=0.8, color="steelblue")
     ax_rate.set_ylabel("Mean firing rate (Hz)")
     ax_rate.set_xlabel("Time (ms)")
     ax_rate.set_title("Population mean firing rate")
     ax_rate.set_xlim(0, time_ms[-1].item())
 
+    # Active neuron count
+    ax_active = fig.add_subplot(gs[2, :])
+    ax_active.plot(time_ms, active_neuron_count, linewidth=0.8, color="mediumpurple")
+    ax_active.set_ylabel("Active neurons")
+    ax_active.set_xlabel("Time (ms)")
+    ax_active.set_title("Number of active neurons per timestep")
+    ax_active.set_xlim(0, time_ms[-1].item())
+
     # Membrane voltage
-    ax_internal_volt = fig.add_subplot(gs[2])
+    ax_internal_volt = fig.add_subplot(gs[3, :])
     ax_internal_volt.plot(time_ms, mean_internal_voltage, linewidth=0.8, color="darkorange")
     ax_internal_volt.plot(time_ms, max_internal_voltage, linestyle="--", linewidth=0.8, color="darkorange")
     ax_internal_volt.axhline(config.v_thresh, linestyle="--", linewidth=0.8,
@@ -68,6 +91,46 @@ def plot_simulation_(external_voltage: torch.Tensor, spikes: torch.Tensor, volta
     ax_internal_volt.set_title("Population mean membrane voltage")
     ax_internal_volt.set_xlim(0, time_ms[-1].item())
     ax_internal_volt.legend(fontsize=8)
+
+    # CB spike rate
+    ax_cb_rate = fig.add_subplot(gs[4, 0])
+    ax_cb_rate.plot(time_ms, mean_cb_spike_rate, linewidth=0.8, color="steelblue")
+    ax_cb_rate.set_ylabel("Mean firing rate (Hz)")
+    ax_cb_rate.set_xlabel("Time (ms)")
+    ax_cb_rate.set_title("Central brain mean firing rate")
+    ax_cb_rate.set_xlim(0, time_ms[-1].item())
+
+    # OL spike rate
+    ax_ol_rate = fig.add_subplot(gs[4, 1])
+    ax_ol_rate.plot(time_ms, mean_ol_spike_rate, linewidth=0.8, color="steelblue")
+    ax_ol_rate.set_ylabel("Mean firing rate (Hz)")
+    ax_ol_rate.set_xlabel("Time (ms)")
+    ax_ol_rate.set_title("Optic lobe mean firing rate")
+    ax_ol_rate.set_xlim(0, time_ms[-1].item())
+
+    # VNC spike rate
+    ax_vnc_rate = fig.add_subplot(gs[4, 2])
+    ax_vnc_rate.plot(time_ms, mean_vnc_spike_rate, linewidth=0.8, color="steelblue")
+    ax_vnc_rate.set_ylabel("Mean firing rate (Hz)")
+    ax_vnc_rate.set_xlabel("Time (ms)")
+    ax_vnc_rate.set_title("Ventral nerve cord mean firing rate")
+    ax_vnc_rate.set_xlim(0, time_ms[-1].item())
+
+    # Sensory spike rate
+    ax_sensory_rate = fig.add_subplot(gs[4, 3])
+    ax_sensory_rate.plot(time_ms, mean_sensory_spike_rate, linewidth=0.8, color="steelblue")
+    ax_sensory_rate.set_ylabel("Mean firing rate (Hz)")
+    ax_sensory_rate.set_xlabel("Time (ms)")
+    ax_sensory_rate.set_title("Sensory neuron mean firing rate")
+    ax_sensory_rate.set_xlim(0, time_ms[-1].item())
+
+    # Motor spike rate
+    ax_motor_rate = fig.add_subplot(gs[4, 4])
+    ax_motor_rate.plot(time_ms, mean_motor_spike_rate, linewidth=0.8, color="steelblue")
+    ax_motor_rate.set_ylabel("Mean firing rate (Hz)")
+    ax_motor_rate.set_xlabel("Time (ms)")
+    ax_motor_rate.set_title("Motor neuron mean firing rate")
+    ax_motor_rate.set_xlim(0, time_ms[-1].item())
 
     plt.show()
     plt.close(fig)
@@ -140,16 +203,17 @@ def main() -> None:
     if args.superclass:
         superclasses = [NeuronSuperclass.from_string(s) for s in args.superclass]
     else:
-        superclasses = [sup for sup in NeuronSuperclass if sup.sensory()]
+        superclasses = NeuronSuperclass.sensory()
 
-    s_mask = superclass_mask(data["superclass_ids"], superclasses).to(device)
+    superclass_ids = data["superclass_ids"]
+    s_mask = superclass_mask(superclass_ids, superclasses).to(device)
 
     pbar = tqdm(desc="Simulation time", total=args.duration, unit="ms")
     on_step = lambda: pbar.update(config.dt)
     external_voltage, spikes, voltages = simulate(model, args.duration, args.rate, args.amplitude, stdp=stdp,
                                                   input_mask=s_mask, config=config, device=device, on_step=on_step)
 
-    plot_simulation_(external_voltage, spikes, voltages, config)
+    plot_simulation_(external_voltage, spikes, voltages, superclass_ids, config)
 
     rates = _mean_firing_rate(spikes, config.dt)
     print(
