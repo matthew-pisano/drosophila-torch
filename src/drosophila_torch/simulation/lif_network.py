@@ -36,6 +36,9 @@ class LIFConfig:
     v_thresh: float = -55.0
     """Spike threshold in mV."""
 
+    v_spike: float = +40
+    """Spike potential in mV."""
+
     v_reset: float = -75.0
     """Post-spike reset potential in mV. Approximates after-hyperpolarization following a spike."""
 
@@ -192,11 +195,14 @@ class DrosophilaLIF(nn.Module):
         # A circular buffer of past spike trains.
         self.register_buffer("spike_buf", torch.zeros(max_delay + 1, n_neurons))
 
+        self.register_buffer("spiking", torch.zeros(n_neurons))
+
     def reset_state(self) -> None:
         """Reset all dynamic state to initial conditions. Call at the start of each trial or epoch."""
 
         self.mem_voltage.fill_(self.config.v_rest)
         self.spike_buf.zero_()
+        self.spiking.zero_()
 
     def forward(self, timestep: int, external_voltage: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """Advance the simulation by one timestep.
@@ -224,6 +230,13 @@ class DrosophilaLIF(nn.Module):
         synaptic_voltages = torch.zeros_like(self.mem_voltage)
         synaptic_voltages.scatter_add_(0, self.axon_post, per_synapse_voltages)
 
+        # Neurons that spiked last timestep hyperpolarize to v_reset
+        self.mem_voltage = torch.where(
+            self.spiking.bool(),
+            torch.full_like(self.mem_voltage, cfg.v_reset),
+            self.mem_voltage,
+        )
+
         # Membrane voltage update
         # The leak naturally pulls v_reset back toward v_rest over time
         membrane_leak = (cfg.dt / cfg.tau_membrane) * (self.mem_voltage - cfg.v_rest)
@@ -233,10 +246,14 @@ class DrosophilaLIF(nn.Module):
         # Spike detection
         spikes = (self.mem_voltage >= cfg.v_thresh).float()
 
-        # Reset to after-hyperpolarization voltage, refractory emerges naturally from the leak pulling v_reset back toward v_rest
-        self.mem_voltage = torch.where(spikes.bool(), torch.full_like(self.mem_voltage, cfg.v_reset), self.mem_voltage)
+        # Spiking neurons jump to v_spike this timestep
+        self.mem_voltage = torch.where(
+            spikes.bool(),
+            torch.full_like(self.mem_voltage, cfg.v_spike),
+            self.mem_voltage,
+        )
 
-        # Write spikes into circular buffer
+        self.spiking = spikes
         self.spike_buf[timestep % (self.max_delay + 1)] = spikes
 
         return spikes, self.mem_voltage
