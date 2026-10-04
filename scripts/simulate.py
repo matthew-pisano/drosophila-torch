@@ -41,15 +41,15 @@ def plot_simulation_(external_voltage: torch.Tensor, spikes: torch.Tensor, volta
 
     # Per-region activity metrics
     cb_mask = superclass_mask(superclass_ids, NeuronSuperclass.central_brain())
-    mean_cb_spike_rate = spikes[:, cb_mask].mean(dim=1).cpu()
+    mean_cb_spike_rate = (spikes[:, cb_mask].mean(dim=1) / (config.dt * 1e-3)).cpu()
     ol_mask = superclass_mask(superclass_ids, NeuronSuperclass.optic_lobe())
-    mean_ol_spike_rate = spikes[:, ol_mask].mean(dim=1).cpu()
+    mean_ol_spike_rate = (spikes[:, ol_mask].mean(dim=1) / (config.dt * 1e-3)).cpu()
     vnc_mask = superclass_mask(superclass_ids, NeuronSuperclass.ventral_nerve_cord())
-    mean_vnc_spike_rate = spikes[:, vnc_mask].mean(dim=1).cpu()
+    mean_vnc_spike_rate = (spikes[:, vnc_mask].mean(dim=1) / (config.dt * 1e-3)).cpu()
     sensory_mask = superclass_mask(superclass_ids, NeuronSuperclass.sensory())
-    mean_sensory_spike_rate = spikes[:, sensory_mask].mean(dim=1).cpu()
+    mean_sensory_spike_rate = (spikes[:, sensory_mask].mean(dim=1) / (config.dt * 1e-3)).cpu()
     motor_mask = superclass_mask(superclass_ids, NeuronSuperclass.motor())
-    mean_motor_spike_rate = spikes[:, motor_mask].mean(dim=1).cpu()
+    mean_motor_spike_rate = (spikes[:, motor_mask].mean(dim=1) / (config.dt * 1e-3)).cpu()
 
     fig = plt.figure(figsize=(20, 14))
     gs = gridspec.GridSpec(4, 5, hspace=0.6, wspace=0.3)
