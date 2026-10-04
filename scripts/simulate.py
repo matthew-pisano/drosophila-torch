@@ -51,8 +51,8 @@ def plot_simulation_(external_voltage: torch.Tensor, spikes: torch.Tensor, volta
     motor_mask = superclass_mask(superclass_ids, NeuronSuperclass.motor())
     mean_motor_spike_rate = spikes[:, motor_mask].mean(dim=1).cpu()
 
-    fig = plt.figure(figsize=(20, 16))
-    gs = gridspec.GridSpec(5, 5, hspace=0.6, wspace=0.3)
+    fig = plt.figure(figsize=(20, 14))
+    gs = gridspec.GridSpec(4, 5, hspace=0.6, wspace=0.3)
 
     # Input voltage
     ax_input_volt = fig.add_subplot(gs[0, :])
@@ -64,22 +64,21 @@ def plot_simulation_(external_voltage: torch.Tensor, spikes: torch.Tensor, volta
 
     # Spike rate
     ax_rate = fig.add_subplot(gs[1, :])
-    ax_rate.plot(time_ms, mean_spike_rate, linewidth=0.8, color="steelblue")
+    plot_rate, = ax_rate.plot(time_ms, mean_spike_rate, linewidth=0.8, color="steelblue", label="Spike rate")
     ax_rate.set_ylabel("Mean firing rate (Hz)")
     ax_rate.set_xlabel("Time (ms)")
-    ax_rate.set_title("Population mean firing rate")
+    ax_rate.set_title("Neuron Activity")
     ax_rate.set_xlim(0, time_ms[-1].item())
 
     # Active neuron count
-    ax_active = fig.add_subplot(gs[2, :])
-    ax_active.plot(time_ms, active_neuron_count, linewidth=0.8, color="mediumpurple")
+    ax_active = ax_rate.twinx()
+    plot_active, = ax_active.plot(time_ms, active_neuron_count, linewidth=0.8, color="mediumpurple", label="Active neurons")
     ax_active.set_ylabel("Active neurons")
-    ax_active.set_xlabel("Time (ms)")
-    ax_active.set_title("Number of active neurons per timestep")
-    ax_active.set_xlim(0, time_ms[-1].item())
+
+    ax_rate.legend(handles=[plot_rate, plot_active], fontsize=8)
 
     # Membrane voltage
-    ax_internal_volt = fig.add_subplot(gs[3, :])
+    ax_internal_volt = fig.add_subplot(gs[2, :])
     ax_internal_volt.plot(time_ms, mean_internal_voltage, linewidth=0.8, color="darkorange")
     ax_internal_volt.plot(time_ms, max_internal_voltage, linestyle="--", linewidth=0.8, color="darkorange")
     ax_internal_volt.axhline(config.v_thresh, linestyle="--", linewidth=0.8,
@@ -93,7 +92,7 @@ def plot_simulation_(external_voltage: torch.Tensor, spikes: torch.Tensor, volta
     ax_internal_volt.legend(fontsize=8)
 
     # CB spike rate
-    ax_cb_rate = fig.add_subplot(gs[4, 0])
+    ax_cb_rate = fig.add_subplot(gs[3, 0])
     ax_cb_rate.plot(time_ms, mean_cb_spike_rate, linewidth=0.8, color="steelblue")
     ax_cb_rate.set_ylabel("Mean firing rate (Hz)")
     ax_cb_rate.set_xlabel("Time (ms)")
@@ -101,7 +100,7 @@ def plot_simulation_(external_voltage: torch.Tensor, spikes: torch.Tensor, volta
     ax_cb_rate.set_xlim(0, time_ms[-1].item())
 
     # OL spike rate
-    ax_ol_rate = fig.add_subplot(gs[4, 1])
+    ax_ol_rate = fig.add_subplot(gs[3, 1])
     ax_ol_rate.plot(time_ms, mean_ol_spike_rate, linewidth=0.8, color="steelblue")
     ax_ol_rate.set_ylabel("Mean firing rate (Hz)")
     ax_ol_rate.set_xlabel("Time (ms)")
@@ -109,7 +108,7 @@ def plot_simulation_(external_voltage: torch.Tensor, spikes: torch.Tensor, volta
     ax_ol_rate.set_xlim(0, time_ms[-1].item())
 
     # VNC spike rate
-    ax_vnc_rate = fig.add_subplot(gs[4, 2])
+    ax_vnc_rate = fig.add_subplot(gs[3, 2])
     ax_vnc_rate.plot(time_ms, mean_vnc_spike_rate, linewidth=0.8, color="steelblue")
     ax_vnc_rate.set_ylabel("Mean firing rate (Hz)")
     ax_vnc_rate.set_xlabel("Time (ms)")
@@ -117,7 +116,7 @@ def plot_simulation_(external_voltage: torch.Tensor, spikes: torch.Tensor, volta
     ax_vnc_rate.set_xlim(0, time_ms[-1].item())
 
     # Sensory spike rate
-    ax_sensory_rate = fig.add_subplot(gs[4, 3])
+    ax_sensory_rate = fig.add_subplot(gs[3, 3])
     ax_sensory_rate.plot(time_ms, mean_sensory_spike_rate, linewidth=0.8, color="steelblue")
     ax_sensory_rate.set_ylabel("Mean firing rate (Hz)")
     ax_sensory_rate.set_xlabel("Time (ms)")
@@ -125,7 +124,7 @@ def plot_simulation_(external_voltage: torch.Tensor, spikes: torch.Tensor, volta
     ax_sensory_rate.set_xlim(0, time_ms[-1].item())
 
     # Motor spike rate
-    ax_motor_rate = fig.add_subplot(gs[4, 4])
+    ax_motor_rate = fig.add_subplot(gs[3, 4])
     ax_motor_rate.plot(time_ms, mean_motor_spike_rate, linewidth=0.8, color="steelblue")
     ax_motor_rate.set_ylabel("Mean firing rate (Hz)")
     ax_motor_rate.set_xlabel("Time (ms)")
