@@ -70,10 +70,35 @@ class NeuronSuperclass(IntEnum):
     VNC_ENDOCRINE = 22
     """Neurons which cary hormonal signals from the ventral nerve cord to the corpora allata or corpora cardiaca."""
 
-    def sensory(self):
-        sensory_set = {NeuronSuperclass.SENSORY_ASCENDING, NeuronSuperclass.CB_SENSORY,
-                       NeuronSuperclass.OL_SENSORY, NeuronSuperclass.VNC_SENSORY}
-        return self in sensory_set
+    @classmethod
+    def central_brain(cls):
+        """Returns a set of central brain neuron superclasses."""
+
+        return {cls.DESCENDING_NEURON, cls.CB_INTRINSIC, cls.CB_MOTOR, cls.CB_EFFERENT, cls.CB_ENDOCRINE, cls.VISUAL_CENTRIFUGAL}
+
+    @classmethod
+    def optic_lobe(cls):
+        """Returns a set of optic lobe neuron superclasses."""
+
+        return {cls.OL_SENSORY, cls.OL_INTRINSIC, cls.VISUAL_PROJECTION}
+
+    @classmethod
+    def ventral_nerve_cord(cls):
+        """Returns a set of ventral nerve cord neuron superclasses."""
+
+        return {cls.VNC_INTRINSIC, cls.VNC_MOTOR, cls.VNC_EFFERENT, cls.VNC_ENDOCRINE}
+
+    @classmethod
+    def sensory(cls):
+        """Returns a set of all sensory neuron superclasses."""
+
+        return {cls.SENSORY_ASCENDING, cls.CB_SENSORY, cls.OL_SENSORY, cls.VNC_SENSORY}
+
+    @classmethod
+    def motor(cls):
+        """Returns a set of all motor neuron superclasses."""
+
+        return {cls.CB_MOTOR, cls.VNC_MOTOR}
 
     def to_string(self):
         return {
