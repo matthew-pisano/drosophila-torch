@@ -179,18 +179,18 @@ class DrosophilaLIF(nn.Module):
         self.register_buffer("sign_vec", sign_vec)
         self.register_buffer("nt_vec", nt_vec)
 
-        # Weights are randomly initialized and scaled by weight_scale.
-        # Kept non-negative; sign is applied at runtime via sign_vec[axon_pre].
-        # Updated by STDPRule, not by gradient descent.
-        min_init, max_init = 0.5, 2.0
+        # Weights are randomly initialized and scaled by weight_scale
+        # Kept non-negative; sign is applied at runtime via sign_vec[axon_pre]
+        min_init, max_init = 0.5, 2.0  # mV transfer per synapse
         weight_range = (max_init - min_init) * torch.rand(axon_post.shape) + min_init
+        # Updated by STDPRule, not by gradient descent
         self.W = nn.Parameter(weight_range * config.weight_scale, requires_grad=False)
 
         max_delay = int(axon_delay.max().item())
         self.max_delay = max_delay
 
-        # The cross membrane voltage of each neuron.
-        self.register_buffer("mem_voltage", torch.full((n_neurons,), config.v_rest))
+        # Randomly initialize membrane voltages between v_reset and v_thresh
+        self.register_buffer("mem_voltage", torch.rand(n_neurons) * (config.v_thresh - config.v_reset) + config.v_reset)
 
         # A circular buffer of past spike trains.
         self.register_buffer("spike_buf", torch.zeros(max_delay + 1, n_neurons))
@@ -200,7 +200,8 @@ class DrosophilaLIF(nn.Module):
     def reset_state(self) -> None:
         """Reset all dynamic state to initial conditions. Call at the start of each trial or epoch."""
 
-        self.mem_voltage.fill_(self.config.v_rest)
+        cfg = self.config
+        self.mem_voltage = torch.rand_like(self.mem_voltage) * (cfg.v_thresh - cfg.v_reset) + cfg.v_reset
         self.spike_buf.zero_()
         self.spiking.zero_()
 
