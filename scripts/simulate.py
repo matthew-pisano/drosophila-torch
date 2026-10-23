@@ -156,11 +156,9 @@ def main() -> None:
     parser.add_argument("data_path", type=Path,
                         help="Path to the connectome .pt file")
     parser.add_argument("--superclass", nargs="+", default=None,
-                        help="Filter input to one or more superclasses e.g. --superclass descending_neuron visual_projection")
+                        help="Filter input stimulation to one or more superclasses e.g. --superclass descending_neuron visual_projection")
     parser.add_argument("--duration", type=float, default=1000.0,
                         help="Simulation duration in ms (default: 1000)")
-    parser.add_argument("--rate", type=float, default=10.0,
-                        help="Poisson input rate for sensory neurons in Hz (default: 10)")
     parser.add_argument("--amplitude", type=float, default=5.0,
                         help="Poisson input voltage for sensory neurons in mV (default: 5)")
     parser.add_argument("--frozen", action="store_true",
