@@ -159,6 +159,8 @@ def main() -> None:
                         help="Filter input stimulation to one or more superclasses e.g. --superclass descending_neuron visual_projection")
     parser.add_argument("--duration", type=float, default=1000.0,
                         help="Simulation duration in ms (default: 1000)")
+    parser.add_argument("--rate", type=float, default=100.0,
+                        help="Input voltage spike rate in Hz (default: 100)")
     parser.add_argument("--amplitude", type=float, default=5.0,
                         help="Poisson input voltage for sensory neurons in mV (default: 5)")
     parser.add_argument("--frozen", action="store_true",
